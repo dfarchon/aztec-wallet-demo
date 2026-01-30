@@ -24,6 +24,11 @@ import type {
 } from "../../../../wallet/types/wallet-interaction";
 import { ExecutionTraceDialog } from "../../dialogs/ExecutionTraceDialog";
 import type { DecodedExecutionTrace } from "../../../../wallet/decoding/tx-callstack-decoder";
+import type {
+  SimulationStats,
+  ProvingStats,
+  StoredPhaseTimings,
+} from "../../shared/PhaseTimeline";
 import { WalletContext } from "../../../renderer";
 
 interface InteractionsListProps {
@@ -128,7 +133,9 @@ export function InteractionsList({
   const { walletAPI } = useContext(WalletContext);
   const [selectedTrace, setSelectedTrace] =
     useState<DecodedExecutionTrace | null>(null);
-  const [selectedStats, setSelectedStats] = useState<any | null>(null);
+  const [selectedStats, setSelectedStats] = useState<SimulationStats | null>(null);
+  const [selectedProvingStats, setSelectedProvingStats] = useState<ProvingStats | null>(null);
+  const [selectedPhaseTimings, setSelectedPhaseTimings] = useState<StoredPhaseTimings | null>(null);
   const [selectedFrom, setSelectedFrom] = useState<string | null>(null);
   const [selectedFeePayer, setSelectedFeePayer] = useState<string | null>(null);
   const [traceDialogOpen, setTraceDialogOpen] = useState(false);
@@ -147,6 +154,8 @@ export function InteractionsList({
         if (result?.trace) {
           setSelectedTrace(result.trace);
           setSelectedStats(result.stats);
+          setSelectedProvingStats(result.provingStats || null);
+          setSelectedPhaseTimings(result.phaseTimings || null);
           setSelectedFrom(result.from || null);
           setSelectedFeePayer(result.embeddedPaymentMethodFeePayer || null);
           setTraceDialogOpen(true);
@@ -349,6 +358,8 @@ export function InteractionsList({
         onClose={() => setTraceDialogOpen(false)}
         trace={selectedTrace}
         stats={selectedStats}
+        provingStats={selectedProvingStats || undefined}
+        phaseTimings={selectedPhaseTimings || undefined}
         from={selectedFrom}
         embeddedPaymentMethodFeePayer={selectedFeePayer}
       />

@@ -123,6 +123,7 @@ export class ExternalWallet extends BaseNativeWallet {
   private createSimulateTxOperation(): SimulateTxOperation {
     return new SimulateTxOperation(
       this.pxe,
+      this.aztecNode,
       this.db,
       this.decodingCache,
       this.interactionManager,
@@ -145,6 +146,7 @@ export class ExternalWallet extends BaseNativeWallet {
     return new SendTxOperation<W>(
       this.pxe,
       this.aztecNode,
+      this.db,
       this.decodingCache,
       this.interactionManager,
       this.authorizationManager,

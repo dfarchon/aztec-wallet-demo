@@ -36,6 +36,8 @@ import type { GasSettings } from "@aztec/stdlib/gas";
 import type { FieldsOf } from "@aztec/foundation/types";
 import type { FeeOptions } from "@aztec/wallet-sdk/base-wallet";
 import type { ChainInfo } from "@aztec/entrypoints/interfaces";
+import type { AztecNode } from "@aztec/aztec.js/node";
+import { PublicViewOptimizer, isPublicStaticCall } from "../utils/public-view-optimizer";
 
 // Readable transaction information with decoded data
 interface ReadableTxInformation {
@@ -104,9 +106,11 @@ export class SimulateTxOperation extends ExternalOperation<
   SimulateTxDisplayData
 > {
   protected interactionManager: InteractionManager;
+  private optimizer: PublicViewOptimizer;
 
   constructor(
     private pxe: PXE,
+    private node: AztecNode,
     private db: WalletDB,
     private decodingCache: DecodingCache,
     interactionManager: InteractionManager,
@@ -129,6 +133,7 @@ export class SimulateTxOperation extends ExternalOperation<
   ) {
     super();
     this.interactionManager = interactionManager;
+    this.optimizer = new PublicViewOptimizer(node, decodingCache);
   }
 
   async check(
@@ -183,33 +188,77 @@ export class SimulateTxOperation extends ExternalOperation<
       ? mergeExecutionPayloads([feeExecutionPayload, executionPayload])
       : executionPayload;
 
-    // Create transaction execution request
-    const {
-      account: fromAccount,
-      instance,
-      artifact,
-    } = await this.getFakeAccountDataFor(opts.from);
+    // Check if all calls are public static (view functions) for optimization
+    const allPublicStatic = finalExecutionPayload.calls.length > 0 &&
+      finalExecutionPayload.calls.every(isPublicStaticCall);
 
-    const chainInfo = await this.getChainInfo();
-    const txRequest = await fromAccount.createTxExecutionRequest(
-      finalExecutionPayload,
-      feeOptions.gasSettings,
-      chainInfo,
-      executionOptions,
-    );
+    let simulationResult: TxSimulationResult;
+    let txRequest: TxExecutionRequest;
 
-    const contractOverrides = {
-      [opts.from.toString()]: { instance, artifact },
-    };
+    // Try optimization for public-static-only payloads
+    if (allPublicStatic) {
+      try {
+        const chainInfo = await this.getChainInfo();
 
-    // Simulate the transaction
-    const simulationResult = await this.pxe.simulateTx(
-      txRequest,
-      true /* simulatePublic */,
-      true,
-      true,
-      { contracts: contractOverrides },
-    );
+        // Optimization: bypass private execution for public view functions
+        simulationResult = await this.optimizer.optimizePublicStaticCalls(
+          finalExecutionPayload.calls,
+          opts.from,
+          chainInfo
+        );
+
+        // Create a minimal txRequest for storage
+        // We still need this for database storage and tracking
+        const {
+          account: fromAccount,
+          instance,
+          artifact,
+        } = await this.getFakeAccountDataFor(opts.from);
+
+        txRequest = await fromAccount.createTxExecutionRequest(
+          finalExecutionPayload,
+          feeOptions.gasSettings,
+          chainInfo,
+          executionOptions,
+        );
+      } catch (err) {
+        // Optimization failed, fall back to normal flow
+        console.warn('[SimulateTx] Public view optimization failed, using normal flow:', err);
+        // Set to undefined to trigger normal flow below
+        simulationResult = undefined as any;
+      }
+    }
+
+    // Normal flow (either no optimization attempted or optimization failed)
+    if (!simulationResult) {
+      // Create transaction execution request
+      const {
+        account: fromAccount,
+        instance,
+        artifact,
+      } = await this.getFakeAccountDataFor(opts.from);
+
+      const chainInfo = await this.getChainInfo();
+      txRequest = await fromAccount.createTxExecutionRequest(
+        finalExecutionPayload,
+        feeOptions.gasSettings,
+        chainInfo,
+        executionOptions,
+      );
+
+      const contractOverrides = {
+        [opts.from.toString()]: { instance, artifact },
+      };
+
+      // Simulate the transaction
+      simulationResult = await this.pxe.simulateTx(
+        txRequest,
+        true /* simulatePublic */,
+        true,
+        true,
+        { contracts: contractOverrides },
+      );
+    }
 
     await this.db.storeTxSimulation(payloadHash, simulationResult, txRequest, {
       from: opts.from.toString(),

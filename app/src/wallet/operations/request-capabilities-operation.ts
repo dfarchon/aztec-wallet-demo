@@ -13,6 +13,7 @@ import {
   WalletInteraction,
   type WalletInteractionType,
 } from "../types/wallet-interaction";
+import type { RequestCapabilitiesParams } from "../types/authorization";
 import type { WalletDB } from "../database/wallet-db";
 import type { InteractionManager } from "../managers/interaction-manager";
 import type { AuthorizationManager } from "../managers/authorization-manager";
@@ -32,15 +33,6 @@ interface RequestCapabilitiesExecutionData {
   granted: GrantedCapability[];
 }
 
-// Display data for authorization UI
-type RequestCapabilitiesDisplayData = {
-  manifest: AppCapabilities;
-  newCapabilityIndices: number[]; // Indices of capabilities that are new/not yet granted
-  contractNames: Record<string, string>; // Map of contract address -> resolved name (plain object for IPC)
-  // Map of storage key -> whether it's already granted (plain object for IPC)
-  existingGrants: Record<string, boolean>;
-};
-
 /**
  * RequestCapabilities operation implementation.
  *
@@ -54,7 +46,7 @@ export class RequestCapabilitiesOperation extends ExternalOperation<
   RequestCapabilitiesArgs,
   RequestCapabilitiesResult,
   RequestCapabilitiesExecutionData,
-  RequestCapabilitiesDisplayData
+  RequestCapabilitiesParams
 > {
   protected interactionManager: InteractionManager;
   private grantedCapabilities?: GrantedCapability[];
@@ -197,7 +189,7 @@ export class RequestCapabilitiesOperation extends ExternalOperation<
   ): Promise<
     PrepareResult<
       RequestCapabilitiesResult,
-      RequestCapabilitiesDisplayData,
+      RequestCapabilitiesParams,
       RequestCapabilitiesExecutionData
     >
   > {
@@ -369,6 +361,13 @@ export class RequestCapabilitiesOperation extends ExternalOperation<
     const contractNamesObj = Object.fromEntries(contractNames);
     const existingGrantsObj = Object.fromEntries(existingGrants);
 
+    // Check if app has been seen before (has any stored authorization records)
+    // This is separate from existingGrants which includes PXE-registered contracts
+    const storedKeys = await this.db.getAllAuthorizationKeys(
+      this.authorizationManager.appId,
+    );
+    const isAppFirstTime = storedKeys.length === 0;
+
     // Display data shows the full manifest plus which capabilities are new
     return {
       displayData: {
@@ -376,6 +375,7 @@ export class RequestCapabilitiesOperation extends ExternalOperation<
         newCapabilityIndices,
         contractNames: contractNamesObj,
         existingGrants: existingGrantsObj,
+        isAppFirstTime,
       },
       executionData: { manifest, granted: [] }, // granted will be filled by authorization
       // No persistence config - we'll manually store capabilities in execute
@@ -383,7 +383,7 @@ export class RequestCapabilitiesOperation extends ExternalOperation<
   }
 
   async requestAuthorization(
-    displayData: RequestCapabilitiesDisplayData,
+    displayData: RequestCapabilitiesParams,
     _persistence?: PersistenceConfig,
   ): Promise<void> {
     await this.emitProgress("REQUESTING AUTHORIZATION", undefined, false, {

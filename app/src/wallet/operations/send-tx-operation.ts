@@ -35,6 +35,7 @@ import type { GasSettings } from "@aztec/stdlib/gas";
 import type { FieldsOf } from "@aztec/foundation/types";
 import { serializePrivateExecutionSteps } from "@aztec/stdlib/kernel";
 import type { FeeOptions } from "@aztec/wallet-sdk/base-wallet";
+import type { WalletDB } from "../database/wallet-db";
 
 // Arguments tuple for the operation (with generic for wait type)
 type SendTxArgs<W extends InteractionWaitOptions = undefined> = [
@@ -49,6 +50,12 @@ type SendTxResult<W extends InteractionWaitOptions = undefined> = SendReturn<W>;
 interface SendTxExecutionData<W extends InteractionWaitOptions = undefined> {
   txRequest: TxExecutionRequest;
   wait: W;
+  payloadHash: string;
+  simulationTime?: number;
+  // Store simulation result and metadata for persisting after execution
+  simulationResult?: any;
+  from?: string;
+  embeddedPaymentMethodFeePayer?: string;
 }
 
 // Display data for authorization UI
@@ -87,6 +94,7 @@ export class SendTxOperation<
   constructor(
     private pxe: PXE,
     private aztecNode: AztecNode,
+    private db: WalletDB,
     private decodingCache: DecodingCache,
     interactionManager: InteractionManager,
     private authorizationManager: AuthorizationManager,
@@ -209,6 +217,8 @@ export class SendTxOperation<
       executionData: {
         txRequest,
         wait: opts.wait,
+        payloadHash,
+        simulationTime: prepared.displayData?.stats?.timings?.total,
       },
     };
   }
@@ -245,6 +255,9 @@ export class SendTxOperation<
   async execute(
     executionData: SendTxExecutionData<W>,
   ): Promise<SendTxResult<W>> {
+    // Track phase timings
+    const provingStartTime = Date.now();
+
     // Report proving stage
     await this.emitProgress("PROVING");
 
@@ -297,6 +310,10 @@ export class SendTxOperation<
       throw provingError;
     }
 
+    const provingTime = Date.now() - provingStartTime;
+    // Extract proving stats from the result
+    const provingStats = provenTx.stats;
+
     const tx = await provenTx.toTx();
     const txHash = tx.getTxHash();
 
@@ -308,22 +325,60 @@ export class SendTxOperation<
 
     // Report sending stage
     await this.emitProgress("SENDING", `TxHash: ${txHash.toString()}`);
+    const sendingStartTime = Date.now();
 
     await this.aztecNode.sendTx(tx).catch((err) => {
       throw this.contextualizeError(err, inspect(tx));
     });
 
+    const sendingTime = Date.now() - sendingStartTime;
+
+    // Helper to format duration
+    const formatDuration = (ms: number | undefined): string => {
+      if (!ms) return "0ms";
+      if (ms < 1000) return `${Math.round(ms)}ms`;
+      return `${(ms / 1000).toFixed(1)}s`;
+    };
+
     // If wait is NO_WAIT, return txHash immediately
     if (executionData.wait === NO_WAIT) {
-      await this.emitProgress("SENT", undefined, true);
+      const timingSummary = `Sim: ${formatDuration(executionData.simulationTime)} | Prove: ${formatDuration(provingTime)} | Send: ${formatDuration(sendingTime)}`;
+      await this.emitProgress("SENT", timingSummary, true);
+      // Store phase timings and proving stats (no mining time since we didn't wait)
+      await this.db.updateTxSimulationWithProvingData(
+        executionData.payloadHash,
+        {
+          simulation: executionData.simulationTime,
+          proving: provingTime,
+          sending: sendingTime,
+        },
+        provingStats,
+      );
       return txHash as SendTxResult<W>;
     }
 
     // Otherwise, wait for the full receipt (default behavior on wait: undefined)
+    const miningStartTime = Date.now();
     const waitOpts =
       typeof executionData.wait === "object" ? executionData.wait : undefined;
     const receipt = await waitForTx(this.aztecNode, txHash, waitOpts);
-    await this.emitProgress("SENT", undefined, true);
+    const miningTime = Date.now() - miningStartTime;
+
+    const timingSummary = `Sim: ${formatDuration(executionData.simulationTime)} | Prove: ${formatDuration(provingTime)} | Send: ${formatDuration(sendingTime)} | Mine: ${formatDuration(miningTime)}`;
+    await this.emitProgress("SENT", timingSummary, true);
+
+    // Store all phase timings including mining and proving stats
+    await this.db.updateTxSimulationWithProvingData(
+      executionData.payloadHash,
+      {
+        simulation: executionData.simulationTime,
+        proving: provingTime,
+        sending: sendingTime,
+        mining: miningTime,
+      },
+      provingStats,
+    );
+
     return receipt as SendTxResult<W>;
   }
 }

@@ -15,7 +15,7 @@ import {
 import { WalletContext } from "../../../../renderer";
 import { AztecAddress } from "@aztec/aztec.js/addresses";
 import type { GrantedCapability, AppCapabilities, CAPABILITY_VERSION } from "@aztec/aztec.js/wallet";
-import type { AuthorizationItem } from "../../../../../wallet/types/authorization";
+import type { AuthorizationItem, RequestCapabilitiesParams } from "../../../../../wallet/types/authorization";
 import { AuthorizeCapabilitiesContent } from "../../../authorization/AuthorizeCapabilitiesContent";
 
 interface AppAuthorizationCardProps {
@@ -34,6 +34,7 @@ export function AppAuthorizationCard({
   const [loading, setLoading] = useState(true);
   const [revoking, setRevoking] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [fakeRequest, setFakeRequest] = useState<AuthorizationItem<RequestCapabilitiesParams> | null>(null);
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
@@ -136,34 +137,51 @@ export function AppAuthorizationCard({
 
 
   // Create a fake AuthorizationItem to pass to AuthorizeCapabilitiesContent
-  // Only create when we have capabilities loaded
-  const fakeRequest = useMemo<AuthorizationItem | null>(() => {
-    if (loading || capabilities.length === 0) {
-      return null;
-    }
+  // Build it asynchronously when capabilities change
+  useEffect(() => {
+    const buildFakeRequest = async () => {
+      if (loading || capabilities.length === 0) {
+        setFakeRequest(null);
+        return;
+      }
 
-    const manifest: AppCapabilities = {
-      version: "1.0" as typeof CAPABILITY_VERSION,
-      metadata: {
-        name: appId,
-        version: "1.0.0",
-      },
-      capabilities: capabilities,
+      const manifest: AppCapabilities = {
+        version: "1.0" as typeof CAPABILITY_VERSION,
+        metadata: {
+          name: appId,
+          version: "1.0.0",
+        },
+        capabilities: capabilities,
+      };
+
+      // Build existingGrants from the loaded capabilities
+      // All storage keys for these capabilities should be marked as granted (true)
+      const existingGrants: Record<string, boolean> = {};
+
+      for (const capability of capabilities) {
+        const keys = await walletAPI.capabilityToStorageKeys(capability);
+        for (const key of keys) {
+          existingGrants[key] = true;
+        }
+      }
+
+      setFakeRequest({
+        id: "view-granted",
+        appId,
+        method: "requestCapabilities",
+        params: {
+          manifest,
+          newCapabilityIndices: [],
+          contractNames: {},
+          existingGrants,
+          isAppFirstTime: false, // This is an existing app with grants
+        },
+        timestamp: Date.now(),
+      });
     };
 
-    return {
-      id: "view-granted",
-      appId,
-      method: "requestCapabilities",
-      params: {
-        manifest,
-        newCapabilityIndices: [],
-        contractNames: {},
-        existingGrants: {},
-      },
-      timestamp: Date.now(),
-    };
-  }, [loading, capabilities, appId]);
+    buildFakeRequest();
+  }, [loading, capabilities, appId, walletAPI]);
 
   return (
     <Card sx={{ width: "100%", position: "relative" }}>

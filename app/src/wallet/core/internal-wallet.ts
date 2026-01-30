@@ -212,6 +212,13 @@ export class InternalWallet extends BaseNativeWallet {
     | {
         trace?: DecodedExecutionTrace;
         stats?: any;
+        provingStats?: any;
+        phaseTimings?: {
+          simulation?: number;
+          proving?: number;
+          sending?: number;
+          mining?: number;
+        };
         from?: string;
         embeddedPaymentMethodFeePayer?: string;
       }
@@ -244,6 +251,8 @@ export class InternalWallet extends BaseNativeWallet {
     return {
       trace: executionTrace,
       stats: parsedSimulationResult.stats,
+      provingStats: data.metadata?.provingStats,
+      phaseTimings: data.metadata?.phaseTimings,
       from: data.metadata?.from,
       embeddedPaymentMethodFeePayer:
         data.metadata?.embeddedPaymentMethodFeePayer,
@@ -257,6 +266,10 @@ export class InternalWallet extends BaseNativeWallet {
 
   async getAppCapabilities(appId: string): Promise<GrantedCapability[]> {
     return await this.db.reconstructCapabilitiesFromKeys(appId);
+  }
+
+  async capabilityToStorageKeys(capability: GrantedCapability): Promise<string[]> {
+    return this.db.capabilityToStorageKeys(capability);
   }
 
   async storeCapabilityGrants(

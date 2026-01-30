@@ -26,6 +26,36 @@ export const AccountTypes = [
 ] as const;
 export type AccountType = (typeof AccountTypes)[number];
 
+/** Phase timings stored with transaction metadata */
+export interface StoredPhaseTimings {
+  simulation?: number;
+  proving?: number;
+  sending?: number;
+  mining?: number;
+}
+
+/** Per-function timing from simulation/proving */
+interface FunctionTiming {
+  functionName: string;
+  time: number;
+  oracles?: Record<string, { times: number[] }>;
+}
+
+/** Timings structure from simulation/proving stats */
+interface StatsTimings {
+  sync: number;
+  publicSimulation?: number;
+  validation?: number;
+  perFunction: FunctionTiming[];
+  unaccounted: number;
+  total: number;
+}
+
+/** Proving stats from TxProvingResult */
+export interface ProvingStats {
+  timings: StatsTimings;
+}
+
 export class WalletDB {
   private constructor(
     private accounts: AztecAsyncMap<string, Buffer>,
@@ -797,7 +827,12 @@ export class WalletDB {
     payloadHash: string,
     simulationResult: TxSimulationResult,
     txRequest: TxExecutionRequest,
-    metadata?: { from?: string; embeddedPaymentMethodFeePayer?: string },
+    metadata?: {
+      from?: string;
+      embeddedPaymentMethodFeePayer?: string;
+      phaseTimings?: StoredPhaseTimings;
+      provingStats?: ProvingStats;
+    },
   ) {
     const data = jsonStringify({
       simulationResult,
@@ -812,9 +847,14 @@ export class WalletDB {
 
   async getTxSimulation(payloadHash: string): Promise<
     | {
-        simulationResult: any;
-        txRequest: any;
-        metadata?: { from?: string; embeddedPaymentMethodFeePayer?: string };
+        simulationResult: TxSimulationResult;
+        txRequest: TxExecutionRequest;
+        metadata?: {
+          from?: string;
+          embeddedPaymentMethodFeePayer?: string;
+          phaseTimings?: StoredPhaseTimings;
+          provingStats?: ProvingStats;
+        };
       }
     | undefined
   > {
@@ -823,6 +863,42 @@ export class WalletDB {
       return undefined;
     }
     return JSON.parse(result);
+  }
+
+  /**
+   * Update phase timings and proving stats for an existing tx simulation.
+   * Used to add proving stats and timing data after execution completes.
+   */
+  async updateTxSimulationWithProvingData(
+    payloadHash: string,
+    phaseTimings: StoredPhaseTimings,
+    provingStats?: ProvingStats,
+  ): Promise<void> {
+    const existing = await this.getTxSimulation(payloadHash);
+    if (!existing) {
+      this.logger.warn(
+        `Cannot update proving data: no simulation found for ${payloadHash}`,
+      );
+      return;
+    }
+
+    const metadata = existing.metadata || {};
+    metadata.phaseTimings = {
+      ...metadata.phaseTimings,
+      ...phaseTimings,
+    };
+    if (provingStats) {
+      metadata.provingStats = provingStats;
+    }
+
+    const data = jsonStringify({
+      ...existing,
+      metadata,
+    });
+    await this.txSimulations.set(payloadHash, data);
+    this.logger.debug(
+      `Phase timings updated for payload hash ${payloadHash}`,
+    );
   }
 
   async storeUtilityTrace(payloadHash: string, trace: any, stats?: any) {
