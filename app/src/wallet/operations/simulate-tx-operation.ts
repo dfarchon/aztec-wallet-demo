@@ -5,7 +5,7 @@ import {
 } from "./base-operation";
 import type { AztecAddress } from "@aztec/stdlib/aztec-address";
 import {
-  type TxSimulationResult,
+  TxSimulationResult,
   type TxExecutionRequest,
   type SimulationStats,
   type ExecutionPayload,
@@ -37,7 +37,11 @@ import type { FieldsOf } from "@aztec/foundation/types";
 import type { FeeOptions } from "@aztec/wallet-sdk/base-wallet";
 import type { ChainInfo } from "@aztec/entrypoints/interfaces";
 import type { AztecNode } from "@aztec/aztec.js/node";
-import { PublicViewOptimizer, isPublicStaticCall } from "../utils/public-view-optimizer";
+import {
+  PublicViewOptimizer,
+  extractPublicStaticCalls,
+} from "../utils/public-view-optimizer";
+import type { Logger } from "@aztec/aztec.js/log";
 
 // Readable transaction information with decoded data
 interface ReadableTxInformation {
@@ -130,10 +134,11 @@ export class SimulateTxOperation extends ExternalOperation<
     ) => Promise<FakeAccountData>,
     private getChainInfo: () => Promise<ChainInfo>,
     private cancellableTransactions: boolean,
+    private log: Logger,
   ) {
     super();
     this.interactionManager = interactionManager;
-    this.optimizer = new PublicViewOptimizer(node, decodingCache);
+    this.optimizer = new PublicViewOptimizer(node, decodingCache, log);
   }
 
   async check(
@@ -184,80 +189,124 @@ export class SimulateTxOperation extends ExternalOperation<
       feePaymentMethodOptions: feeOptions.accountFeePaymentMethodOptions,
     };
 
-    const finalExecutionPayload = feeExecutionPayload
-      ? mergeExecutionPayloads([feeExecutionPayload, executionPayload])
-      : executionPayload;
+    // IMPORTANT: Extract public static calls from INITIAL payload
+    const { publicStatic, other } = extractPublicStaticCalls(executionPayload);
 
-    // Check if all calls are public static (view functions) for optimization
-    const allPublicStatic = finalExecutionPayload.calls.length > 0 &&
-      finalExecutionPayload.calls.every(isPublicStaticCall);
+    const chainInfo = await this.getChainInfo();
+    const BATCH_SIZE = 5;
 
-    let simulationResult: TxSimulationResult;
-    let txRequest: TxExecutionRequest;
+    // Get current synced block header from PXE for optimization
+    const blockHeader = await this.pxe.debug.getSyncedBlockHeader();
 
-    // Try optimization for public-static-only payloads
-    if (allPublicStatic) {
-      try {
-        const chainInfo = await this.getChainInfo();
+    // Build promises for concurrent execution
+    const promises: [
+      Promise<TxSimulationResult[]> | null,
+      Promise<{ result: TxSimulationResult; txReq: TxExecutionRequest }> | null,
+    ] = [null, null];
 
-        // Optimization: bypass private execution for public view functions
-        simulationResult = await this.optimizer.optimizePublicStaticCalls(
-          finalExecutionPayload.calls,
-          opts.from,
-          chainInfo
-        );
+    // Optimization path - batch public static calls
+    if (publicStatic.length > 0) {
+      this.log.debug(`Optimizing ${publicStatic.length} public static calls`);
+      promises[0] = (async () => {
+        const results: TxSimulationResult[] = [];
+        for (let i = 0; i < publicStatic.length; i += BATCH_SIZE) {
+          const batch = publicStatic.slice(i, i + BATCH_SIZE);
+          // Simulate entire batch in one call with gas settings and block header
+          const batchResult = await this.optimizer.optimizePublicStaticCalls(
+            batch,
+            opts.from,
+            chainInfo,
+            feeOptions.gasSettings,
+            blockHeader,
+          );
+          results.push(batchResult);
+        }
+        return results;
+      })();
+    }
 
-        // Create a minimal txRequest for storage
-        // We still need this for database storage and tracking
+    // Normal simulation path - if there are non-optimizable calls
+    if (other.length > 0) {
+      this.log.debug(`Running normal simulation for ${other.length} calls`);
+      const normalPayload = feeExecutionPayload
+        ? mergeExecutionPayloads([
+            feeExecutionPayload,
+            { ...executionPayload, calls: other },
+          ])
+        : { ...executionPayload, calls: other };
+
+      promises[1] = (async () => {
         const {
           account: fromAccount,
           instance,
           artifact,
         } = await this.getFakeAccountDataFor(opts.from);
 
-        txRequest = await fromAccount.createTxExecutionRequest(
-          finalExecutionPayload,
+        const txReq = await fromAccount.createTxExecutionRequest(
+          normalPayload,
           feeOptions.gasSettings,
           chainInfo,
           executionOptions,
         );
-      } catch (err) {
-        // Optimization failed, fall back to normal flow
-        console.warn('[SimulateTx] Public view optimization failed, using normal flow:', err);
-        // Set to undefined to trigger normal flow below
-        simulationResult = undefined as any;
-      }
+
+        const contractOverrides = {
+          [opts.from.toString()]: { instance, artifact },
+        };
+
+        return {
+          result: await this.pxe.simulateTx(
+            txReq,
+            true /* simulatePublic */,
+            true,
+            true,
+            { contracts: contractOverrides },
+          ),
+          txReq,
+        };
+      })();
     }
 
-    // Normal flow (either no optimization attempted or optimization failed)
-    if (!simulationResult) {
-      // Create transaction execution request
-      const {
-        account: fromAccount,
-        instance,
-        artifact,
-      } = await this.getFakeAccountDataFor(opts.from);
+    // Execute paths concurrently and merge results
+    const [optimizedResults, normalResult] = await Promise.all(promises);
 
-      const chainInfo = await this.getChainInfo();
+    let simulationResult: TxSimulationResult;
+    let txRequest: TxExecutionRequest;
+
+    if (optimizedResults && normalResult) {
+      // Mixed: merge both results
+      txRequest = normalResult.txReq;
+      simulationResult = this.optimizer.mergeSimulationResults(
+        normalResult.result,
+        optimizedResults,
+        executionPayload.calls,
+        publicStatic,
+        other,
+      );
+      this.log.debug("Merged optimized and normal results");
+    } else if (optimizedResults) {
+      // Pure optimization: merge optimized results only
+      simulationResult = this.optimizer.mergeOptimizedResults(optimizedResults);
+
+      // Create txRequest for storage
+      const finalExecutionPayload = feeExecutionPayload
+        ? mergeExecutionPayloads([feeExecutionPayload, executionPayload])
+        : executionPayload;
+
+      const { account: fromAccount } = await this.getFakeAccountDataFor(
+        opts.from,
+      );
       txRequest = await fromAccount.createTxExecutionRequest(
         finalExecutionPayload,
         feeOptions.gasSettings,
         chainInfo,
         executionOptions,
       );
-
-      const contractOverrides = {
-        [opts.from.toString()]: { instance, artifact },
-      };
-
-      // Simulate the transaction
-      simulationResult = await this.pxe.simulateTx(
-        txRequest,
-        true /* simulatePublic */,
-        true,
-        true,
-        { contracts: contractOverrides },
-      );
+      this.log.debug("Pure optimization successful");
+    } else {
+      // Normal only: use normal result
+      simulationResult = normalResult!.result;
+      txRequest = normalResult!.txReq;
+      this.log.debug("Normal simulation only");
     }
 
     await this.db.storeTxSimulation(payloadHash, simulationResult, txRequest, {
