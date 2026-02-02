@@ -50,7 +50,10 @@ export interface DecodedExecutionTrace {
 export class TxCallStackDecoder {
   private calldataMap: Map<string, any[]> = new Map();
 
-  constructor(private cache: DecodingCache) {}
+  constructor(
+    private cache: DecodingCache,
+    private log?: any,
+  ) {}
 
   private async formatAndResolveValue(value: AbiDecoded): Promise<string> {
     // Handle arrays recursively
@@ -311,55 +314,47 @@ export class TxCallStackDecoder {
     const calldata = this.calldataMap.get(calldataHashStr);
 
     if (calldata && calldata.length > 0) {
+      // First element of calldata is the function selector
+      const functionSelector = FunctionSelector.fromField(calldata[0]);
+
+      // Try to resolve function name and decode arguments from contract ABI
       try {
-        // First element of calldata is the function selector
-        const functionSelector = FunctionSelector.fromField(calldata[0]);
+        const instance = await this.cache.getContractInstance(
+          request.contractAddress,
+        );
+        const artifact = await this.cache.getContractArtifact(
+          instance.currentContractClassId,
+        );
+        const allAbis = await getAllFunctionAbis(artifact);
+        const abisWithSelector = await Promise.all(
+          allAbis.map(async (abi) => ({
+            ...abi,
+            selector: await FunctionSelector.fromNameAndParameters(
+              abi.name,
+              abi.parameters,
+            ),
+          })),
+        );
+        const functionAbi = abisWithSelector.find((abi) =>
+          abi.selector.equals(functionSelector),
+        );
 
-        // Try to resolve function name and decode arguments from contract ABI
-        try {
-          const instance = await this.cache.getContractInstance(
-            request.contractAddress,
-          );
-          const artifact = await this.cache.getContractArtifact(
-            instance.currentContractClassId,
-          );
-          const allAbis = await getAllFunctionAbis(artifact);
-          const abisWithSelector = await Promise.all(
-            allAbis.map(async (abi) => ({
-              ...abi,
-              selector: await FunctionSelector.fromNameAndParameters(
-                abi.name,
-                abi.parameters,
-              ),
-            })),
-          );
-          const functionAbi = abisWithSelector.find((abi) =>
-            abi.selector.equals(functionSelector),
-          );
+        if (functionAbi) {
+          functionName = functionAbi.name;
 
-          if (functionAbi) {
-            functionName = functionAbi.name;
-
-            // Decode arguments - calldata is [selector, ...args]
-            if (functionAbi.parameters.length > 0 && calldata.length > 1) {
-              try {
-                const argsData = calldata.slice(1); // Skip the selector
-                // Reuse the generic argument decoding helper
-                args = await this.decodeAndFormatArguments(
-                  functionAbi,
-                  argsData,
-                );
-              } catch (error) {
-                // Silently fail - args will remain empty
-              }
-            }
+          // Decode arguments - calldata is [selector, ...args]
+          if (functionAbi.parameters.length > 0 && calldata.length > 1) {
+            const argsData = calldata.slice(1); // Skip the selector
+            args = await this.decodeAndFormatArguments(
+              functionAbi,
+              argsData,
+            );
           }
-        } catch {
-          // If we can't resolve from ABI, use the selector hex
-          functionName = `0x${functionSelector.toString().slice(2, 10)}`;
         }
       } catch (error) {
-        // Silently fail
+        // If we can't resolve from ABI, use the selector hex
+        this.log?.error('Failed to resolve function from ABI:', error);
+        functionName = `0x${functionSelector.toString().slice(2, 10)}`;
       }
     }
 
@@ -402,7 +397,7 @@ export class TxCallStackDecoder {
     const privateExecution = await this.decodePrivateCall(entrypoint, 0, []);
 
     // Collect all public enqueues in execution order (by counter)
-    const allPublicEnqueues: PublicEnqueueEvent[] = [];
+    let allPublicEnqueues: PublicEnqueueEvent[] = [];
 
     const collectPublicEnqueues = (event: ExecutionEvent) => {
       if (event.type === "public-enqueue") {

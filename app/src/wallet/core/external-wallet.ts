@@ -114,6 +114,7 @@ export class ExternalWallet extends BaseNativeWallet {
       this.decodingCache,
       this.interactionManager,
       this.authorizationManager,
+      this.log,
     );
   }
 

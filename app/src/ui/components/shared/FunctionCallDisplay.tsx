@@ -16,7 +16,7 @@ export interface FunctionCallDisplayProps {
   args: Array<{ name: string; value: string }>;
   returnValues: Array<{ name: string; value: string }>;
   callerName?: string;
-  typeLabel: "Private" | "Utility";
+  typeLabel: "Private" | "Utility" | "Public";
   typeChipColor?: "primary";
   depth?: number;
   isStaticCall?: boolean;

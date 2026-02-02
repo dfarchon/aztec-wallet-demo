@@ -46,6 +46,7 @@ const PublicEnqueueEventSchema: z.ZodType<any> = z.object({
   function: z.string(),
   caller: ContractInfoSchema,
   isStaticCall: z.boolean(),
+  args: z.array(ArgValueSchema),
 });
 
 const PrivateCallEventSchema: z.ZodType<any> = z.lazy(() =>

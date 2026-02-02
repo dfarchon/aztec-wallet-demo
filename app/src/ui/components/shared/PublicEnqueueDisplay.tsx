@@ -1,3 +1,4 @@
+import React from "react";
 import Box from "@mui/material/Box";
 import Typography from "@mui/material/Typography";
 import Accordion from "@mui/material/Accordion";
@@ -13,7 +14,7 @@ export interface PublicEnqueueDisplayProps {
 }
 
 export function PublicEnqueueDisplay({ enqueue }: PublicEnqueueDisplayProps) {
-  const hasArgs = enqueue.args?.length > 0;
+  const hasArgs = enqueue.args.length > 0;
 
   return (
     <Box
@@ -98,9 +99,8 @@ export function PublicEnqueueDisplay({ enqueue }: PublicEnqueueDisplayProps) {
                   }}
                 >
                   {enqueue.args.map((arg, i) => (
-                    <>
+                    <React.Fragment key={i}>
                       <Typography
-                        key={`${i}-name`}
                         sx={{
                           fontFamily: "monospace",
                           fontSize: "0.875rem",
@@ -112,7 +112,6 @@ export function PublicEnqueueDisplay({ enqueue }: PublicEnqueueDisplayProps) {
                         {arg.name}:
                       </Typography>
                       <Typography
-                        key={`${i}-value`}
                         sx={{
                           fontFamily: "monospace",
                           fontSize: "0.8125rem",
@@ -121,7 +120,7 @@ export function PublicEnqueueDisplay({ enqueue }: PublicEnqueueDisplayProps) {
                       >
                         {arg.value}
                       </Typography>
-                    </>
+                    </React.Fragment>
                   ))}
                 </Box>
               </Box>

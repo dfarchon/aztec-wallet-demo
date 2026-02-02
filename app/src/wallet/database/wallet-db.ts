@@ -17,7 +17,7 @@ import {
   type WalletInteractionType,
 } from "../types/wallet-interaction";
 import { jsonStringify } from "@aztec/foundation/json-rpc";
-import { TxExecutionRequest, TxSimulationResult } from "@aztec/stdlib/tx";
+import { TxSimulationResult } from "@aztec/stdlib/tx";
 
 export const AccountTypes = [
   "schnorr",
@@ -826,7 +826,6 @@ export class WalletDB {
   async storeTxSimulation(
     payloadHash: string,
     simulationResult: TxSimulationResult,
-    txRequest: TxExecutionRequest,
     metadata?: {
       from?: string;
       embeddedPaymentMethodFeePayer?: string;
@@ -836,7 +835,6 @@ export class WalletDB {
   ) {
     const data = jsonStringify({
       simulationResult,
-      txRequest,
       metadata,
     });
     await this.txSimulations.set(payloadHash, data);
@@ -848,7 +846,6 @@ export class WalletDB {
   async getTxSimulation(payloadHash: string): Promise<
     | {
         simulationResult: TxSimulationResult;
-        txRequest: TxExecutionRequest;
         metadata?: {
           from?: string;
           embeddedPaymentMethodFeePayer?: string;

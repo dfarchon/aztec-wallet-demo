@@ -18,9 +18,9 @@ export class TxDecodingService {
   private formatter: CallAuthorizationFormatter;
   private decoder: TxCallStackDecoder;
 
-  constructor(cache: DecodingCache) {
+  constructor(cache: DecodingCache, log?: any) {
     this.formatter = new CallAuthorizationFormatter(cache);
-    this.decoder = new TxCallStackDecoder(cache);
+    this.decoder = new TxCallStackDecoder(cache, log);
   }
 
   /**

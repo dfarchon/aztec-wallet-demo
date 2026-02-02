@@ -240,7 +240,7 @@ export class InternalWallet extends BaseNativeWallet {
     }
 
     // Use the shared decoding cache from BaseNativeWallet
-    const decodingService = new TxDecodingService(this.decodingCache);
+    const decodingService = new TxDecodingService(this.decodingCache, this.log);
     const parsedSimulationResult = TxSimulationResult.schema.parse(
       data.simulationResult,
     );

@@ -8,6 +8,7 @@ import {
   type ProvingStats,
   type StoredPhaseTimings,
 } from "./PhaseTimeline";
+import { AztecAddress } from "@aztec/stdlib/aztec-address";
 import Box from "@mui/material/Box";
 import Typography from "@mui/material/Typography";
 import Table from "@mui/material/Table";
@@ -75,7 +76,8 @@ function SimulationStatsDisplay({ stats }: SimulationStatsDisplayProps) {
           variant="subtitle2"
           sx={{ fontWeight: 600, color: "text.secondary" }}
         >
-          RPC Round Trips ({stats.nodeRPCCalls.roundTrips.roundTripDurations.length})
+          RPC Round Trips (
+          {stats.nodeRPCCalls.roundTrips.roundTripDurations.length})
         </Typography>
       </AccordionSummary>
       <AccordionDetails sx={{ pt: 1, pb: 2 }}>
@@ -95,13 +97,16 @@ function SimulationStatsDisplay({ stats }: SimulationStatsDisplayProps) {
             <TableBody>
               {stats.nodeRPCCalls.roundTrips.roundTripDurations.map(
                 (duration, index) => {
-                  const methods = stats.nodeRPCCalls.roundTrips.roundTripMethods[index] || [];
+                  const methods =
+                    stats.nodeRPCCalls.roundTrips.roundTripMethods[index] || [];
                   return (
                     <TableRow key={index}>
                       <TableCell sx={{ fontFamily: "monospace" }}>
                         #{index + 1}
                       </TableCell>
-                      <TableCell sx={{ fontFamily: "monospace", fontSize: "0.75rem" }}>
+                      <TableCell
+                        sx={{ fontFamily: "monospace", fontSize: "0.75rem" }}
+                      >
                         {methods.join(", ")}
                       </TableCell>
                       <TableCell align="right">
@@ -109,7 +114,7 @@ function SimulationStatsDisplay({ stats }: SimulationStatsDisplayProps) {
                       </TableCell>
                     </TableRow>
                   );
-                }
+                },
               )}
             </TableBody>
           </Table>
@@ -142,10 +147,7 @@ export function ExecutionTraceDisplay({
         {/* Phase timeline for utility simulations */}
         {stats && (
           <Box sx={{ mb: 2 }}>
-            <TransactionPhaseTimeline
-              simulationStats={stats}
-              size="normal"
-            />
+            <TransactionPhaseTimeline simulationStats={stats} size="normal" />
           </Box>
         )}
         <FunctionCallDisplay
@@ -164,6 +166,12 @@ export function ExecutionTraceDisplay({
 
   // Full transaction trace
   const decodedTrace = trace as DecodedExecutionTrace;
+
+  // Detect optimized public-only simulations (entrypoint with zero address = empty entrypoint from optimizer)
+  const isOptimizedPublicOnly =
+    decodedTrace.privateExecution.contract.address === AztecAddress.ZERO.toString() &&
+    decodedTrace.publicExecutionQueue.length > 0;
+
   return (
     <>
       {/* Phase timeline showing simulation, proving, sending, mining times */}
@@ -177,11 +185,33 @@ export function ExecutionTraceDisplay({
           />
         </Box>
       )}
-      <PrivateCallDisplay
-        call={decodedTrace.privateExecution}
-        authorizations={callAuthorizations}
-        accordionBgColor={accordionBgColor}
-      />
+
+      {isOptimizedPublicOnly ? (
+        // Show public calls directly for optimized simulations
+        <>
+          {decodedTrace.publicExecutionQueue.map((publicCall, idx) => (
+            <FunctionCallDisplay
+              key={idx}
+              contractName={publicCall.contract.name || "Unknown"}
+              contractAddress={publicCall.contract.address}
+              functionName={publicCall.function}
+              args={publicCall.args}
+              returnValues={[]}
+              typeLabel="Public"
+              isStaticCall={publicCall.isStaticCall}
+              accordionBgColor={accordionBgColor}
+            />
+          ))}
+        </>
+      ) : (
+        // Show normal private execution
+        <PrivateCallDisplay
+          call={decodedTrace.privateExecution}
+          authorizations={callAuthorizations}
+          accordionBgColor={accordionBgColor}
+        />
+      )}
+
       {stats && <SimulationStatsDisplay stats={stats} trace={trace} />}
     </>
   );

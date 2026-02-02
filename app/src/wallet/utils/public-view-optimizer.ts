@@ -19,7 +19,7 @@ import {
   FunctionType,
   type FunctionSelector,
 } from "@aztec/stdlib/abi";
-import type { AztecAddress } from "@aztec/stdlib/aztec-address";
+import { AztecAddress } from "@aztec/stdlib/aztec-address";
 import {
   HashedValues,
   PrivateCallExecutionResult,
@@ -29,11 +29,12 @@ import {
   type ExecutionPayload,
   BlockHeader,
   TxContext,
+  NestedProcessReturnValues,
 } from "@aztec/stdlib/tx";
 import type { AztecNode } from "@aztec/aztec.js/node";
 import type { DecodingCache } from "../decoding/decoding-cache";
 import { Fr } from "@aztec/foundation/curves/bn254";
-import { padArrayEnd } from "@aztec/foundation/collection";
+import { makeTuple } from "@aztec/foundation/array";
 import { type Tuple } from "@aztec/foundation/serialize";
 import { MAX_ENQUEUED_CALLS_PER_CALL } from "@aztec/constants";
 import {
@@ -145,25 +146,26 @@ export class PublicViewOptimizer {
   }
 
   /**
-   * Optimize public static calls by bypassing private execution.
+   * Optimize a batch of public static calls (up to MAX_ENQUEUED_CALLS_PER_CALL).
    *
    * This is the core optimization: instead of going through account entrypoint
    * and private execution, we directly call node.simulatePublicCalls.
    *
-   * @param publicStaticCalls - Array of public static function calls to optimize
+   * @param publicStaticCalls - Array of public static function calls to optimize (max 32)
    * @param from - The account address making the call
    * @param chainInfo - Chain information including chainId and version
    * @param gasSettings - Gas settings for the transaction
    * @param blockHeader - Block header to use as anchor block
    * @returns TxSimulationResult with public return values
    */
-  async optimizePublicStaticCalls(
+  private async optimizeBatch(
     publicStaticCalls: FunctionCall[],
     from: AztecAddress,
     chainInfo: any,
     gasSettings: GasSettings,
     blockHeader: BlockHeader,
-  ): Promise<TxSimulationResult> {
+  ): Promise<{ result: TxSimulationResult; timing: number }> {
+    const startTime = Date.now();
     // Step 1: Build TxContext with real values
     const txContext = new TxContext(
       chainInfo.chainId,
@@ -173,48 +175,51 @@ export class PublicViewOptimizer {
 
     // Step 2: Encode public function calls as calldata and create PublicCallRequests
     const publicFunctionCalldata: HashedValues[] = [];
-    const publicCallRequests: CountedPublicCallRequest[] = [];
 
-    let counter = 0;
     for (const call of publicStaticCalls) {
-      // Encode the function call arguments
       const calldata = await HashedValues.fromCalldata([
         call.selector.toField(),
         ...call.args,
       ]);
       publicFunctionCalldata.push(calldata);
-
-      // Create PublicCallRequest for this call
-      const publicCallRequest = await PublicCallRequest.fromCalldata(
-        from, // msgSender
-        call.to, // contractAddress
-        call.isStatic, // isStaticCall (should be true)
-        call.args, // calldata
-      );
-
-      publicCallRequests.push(
-        new CountedPublicCallRequest(publicCallRequest, counter++),
-      );
     }
 
+    const publicCallRequests = makeTuple(MAX_ENQUEUED_CALLS_PER_CALL, (i) => {
+      const call = publicStaticCalls[i];
+      if (!call) {
+        return CountedPublicCallRequest.empty();
+      }
+      const publicCallRequest = new PublicCallRequest(
+        from,
+        call.to,
+        call.isStatic,
+        publicFunctionCalldata[i]!.hash,
+      );
+      // Counter starts at 1 (minRevertibleSideEffectCounter) so all calls are revertible
+      return new CountedPublicCallRequest(publicCallRequest, i + 1);
+    });
+
     // Step 3: Create PrivateCircuitPublicInputs with real values and public call requests
+    // makeTuple already creates a properly typed fixed-size array
     const publicCallRequestsArray: ClaimedLengthArray<
       CountedPublicCallRequest,
       typeof MAX_ENQUEUED_CALLS_PER_CALL
     > = new ClaimedLengthArray(
-      padArrayEnd(
-        publicCallRequests,
-        CountedPublicCallRequest.empty(),
-        MAX_ENQUEUED_CALLS_PER_CALL,
-      ) as Tuple<CountedPublicCallRequest, typeof MAX_ENQUEUED_CALLS_PER_CALL>,
-      publicCallRequests.length,
+      publicCallRequests as Tuple<
+        CountedPublicCallRequest,
+        typeof MAX_ENQUEUED_CALLS_PER_CALL
+      >,
+      publicStaticCalls.length, // claimed length is the actual number of calls
     );
+
 
     const publicInputs = PrivateCircuitPublicInputs.from({
       ...PrivateCircuitPublicInputs.empty(),
       anchorBlockHeader: blockHeader,
       txContext: txContext,
       publicCallRequests: publicCallRequestsArray,
+      startSideEffectCounter: new Fr(0),
+      endSideEffectCounter: new Fr(publicStaticCalls.length + 1), // Cover all counters from 1 to length
     });
 
     // Step 4: Create empty entrypoint - minimal structure with no real execution
@@ -246,7 +251,7 @@ export class PublicViewOptimizer {
     const provingResult = await generateSimulatedProvingResult(
       privateResult,
       this.contractStore as any,
-      1,
+      1, // minRevertibleSideEffectCounter - all our calls have counter >= 1
     );
 
     // Step 7: Build Tx from kernel outputs
@@ -263,134 +268,65 @@ export class PublicViewOptimizer {
       true /* skipFeeEnforcement */,
     );
 
-    // Step 9: Return TxSimulationResult
-    return new TxSimulationResult(
-      privateResult,
-      provingResult.publicInputs,
-      publicOutput,
-      undefined, // stats: will be populated if needed
-    );
+    const timing = Date.now() - startTime;
+
+    // Step 9: Return TxSimulationResult with timing
+    return {
+      result: new TxSimulationResult(
+        privateResult,
+        provingResult.publicInputs,
+        publicOutput,
+        undefined, // stats will be populated by caller
+      ),
+      timing,
+    };
   }
 
   /**
-   * Merge optimized public static results with normal simulation results.
-   * Reconstructs return values in original call order.
+   * Optimize public static calls by batching into groups of MAX_ENQUEUED_CALLS_PER_CALL.
    *
-   * @param normalResult - Result from normal simulation (private + non-static calls)
-   * @param optimizedResults - Array of batch results from optimized public static calls
-   * @param originalCalls - Original call order from execution payload
-   * @param publicStatic - The public static calls that were optimized
-   * @param other - The other calls that went through normal simulation
-   * @returns Merged TxSimulationResult with return values in original order
+   * @param publicStaticCalls - Array of public static function calls to optimize
+   * @param from - The account address making the call
+   * @param chainInfo - Chain information including chainId and version
+   * @param gasSettings - Gas settings for the transaction
+   * @param blockHeader - Block header to use as anchor block
+   * @returns Array of TxSimulationResult (one per batch)
    */
-  mergeSimulationResults(
-    normalResult: TxSimulationResult,
-    optimizedResults: TxSimulationResult[],
-    originalCalls: FunctionCall[],
-    publicStatic: FunctionCall[],
-    _other: FunctionCall[],
-  ): TxSimulationResult {
-    // Flatten optimized return values from batches
-    const flatOptimizedReturnValues = optimizedResults.flatMap(
-      (r) => r.publicOutput?.publicReturnValues || [],
-    );
+  async optimizePublicStaticCalls(
+    publicStaticCalls: FunctionCall[],
+    from: AztecAddress,
+    chainInfo: any,
+    gasSettings: GasSettings,
+    blockHeader: BlockHeader,
+  ): Promise<TxSimulationResult[]> {
+    const batches: FunctionCall[][] = [];
+
+    // Split into batches of MAX_ENQUEUED_CALLS_PER_CALL
+    for (let i = 0; i < publicStaticCalls.length; i += MAX_ENQUEUED_CALLS_PER_CALL) {
+      batches.push(publicStaticCalls.slice(i, i + MAX_ENQUEUED_CALLS_PER_CALL));
+    }
 
     this.log.debug(
-      `Merging ${flatOptimizedReturnValues.length} optimized + ${normalResult.publicOutput?.publicReturnValues?.length || 0} normal results`,
+      `Optimizing ${publicStaticCalls.length} public static calls in ${batches.length} batch(es)`,
     );
 
-    // Create index mapping: original call index -> result source
-    const callIndexMap = new Map<
-      number,
-      { type: "optimized" | "normal"; index: number }
-    >();
+    const results: TxSimulationResult[] = [];
+    let totalTiming = 0;
 
-    let optimizedIdx = 0;
-    let normalIdx = 0;
-
-    for (let i = 0; i < originalCalls.length; i++) {
-      const call = originalCalls[i];
-      const isPublicStatic = publicStatic.some(
-        (ps) =>
-          ps.to.equals(call.to) &&
-          ps.name === call.name &&
-          ps.selector.equals(call.selector),
+    for (const batch of batches) {
+      const { result, timing } = await this.optimizeBatch(
+        batch,
+        from,
+        chainInfo,
+        gasSettings,
+        blockHeader,
       );
-
-      if (isPublicStatic) {
-        callIndexMap.set(i, { type: "optimized", index: optimizedIdx++ });
-      } else {
-        callIndexMap.set(i, { type: "normal", index: normalIdx++ });
-      }
+      results.push(result);
+      totalTiming += timing;
     }
 
-    // Extract return values from both sources
-    const normalReturnValues =
-      normalResult.publicOutput?.publicReturnValues || [];
+    this.log.debug(`Optimization complete in ${totalTiming}ms`);
 
-    // Reconstruct in original order
-    const mergedReturnValues = [];
-    for (let i = 0; i < originalCalls.length; i++) {
-      const mapping = callIndexMap.get(i);
-      if (!mapping) continue;
-
-      if (mapping.type === "optimized") {
-        mergedReturnValues.push(flatOptimizedReturnValues[mapping.index]);
-      } else {
-        mergedReturnValues.push(normalReturnValues[mapping.index]);
-      }
-    }
-
-    // Return merged result using normal simulation as base
-    return new TxSimulationResult(
-      normalResult.privateExecutionResult,
-      normalResult.publicInputs,
-      {
-        ...normalResult.publicOutput!,
-        publicReturnValues: mergedReturnValues,
-      },
-      normalResult.stats,
-    );
-  }
-
-  /**
-   * Merge multiple optimized batch results into a single TxSimulationResult.
-   * Used when ALL calls are public static (no normal simulation).
-   *
-   * @param optimizedResults - Array of batch optimization results
-   * @returns Single merged TxSimulationResult
-   */
-  mergeOptimizedResults(
-    optimizedResults: TxSimulationResult[],
-  ): TxSimulationResult {
-    if (optimizedResults.length === 0) {
-      throw new Error("Cannot merge empty optimized results");
-    }
-
-    if (optimizedResults.length === 1) {
-      return optimizedResults[0];
-    }
-
-    this.log.debug(
-      `Merging ${optimizedResults.length} batched optimized results`,
-    );
-
-    // Use first result as base
-    const base = optimizedResults[0];
-
-    // Flatten all return values from all batches
-    const allReturnValues = optimizedResults.flatMap(
-      (r) => r.publicOutput?.publicReturnValues || [],
-    );
-
-    return new TxSimulationResult(
-      base.privateExecutionResult,
-      base.publicInputs,
-      {
-        ...base.publicOutput!,
-        publicReturnValues: allReturnValues,
-      },
-      base.stats,
-    );
+    return results;
   }
 }
