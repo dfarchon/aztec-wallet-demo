@@ -255,11 +255,10 @@ export class SimulateTxOperation extends ExternalOperation<
     let normalIdx = 0;
 
     for (const isOptimized of callOrder) {
-      if (isOptimized) {
-        orderedReturnValues.push(optimizedReturnValues[optimizedIdx++]);
-      } else {
-        orderedReturnValues.push(normalReturnValues[normalIdx++]);
-      }
+      const rv = isOptimized
+        ? optimizedReturnValues[optimizedIdx++]
+        : normalReturnValues[normalIdx++];
+      orderedReturnValues.push(rv);
     }
 
     // Build final result
