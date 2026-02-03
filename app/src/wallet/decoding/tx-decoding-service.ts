@@ -1,4 +1,9 @@
-import type { TxSimulationResult } from "@aztec/stdlib/tx";
+import type {
+  TxSimulationResult,
+  NestedProcessReturnValues,
+} from "@aztec/stdlib/tx";
+import type { AztecAddress } from "@aztec/stdlib/aztec-address";
+import type { Fr } from "@aztec/foundation/curves/bn254";
 import type { DecodingCache } from "./decoding-cache";
 import {
   CallAuthorizationFormatter,
@@ -25,21 +30,24 @@ export class TxDecodingService {
 
   /**
    * Decode transaction information including call authorizations and execution trace.
-   * Returns fallback data if decoding fails.
+   *
+   * @param simulationResult - The simulation result to decode
+   * @param optimizedCalls - Optional info about optimized public calls that bypassed private execution
+   * @returns Decoded call authorizations and execution trace
    */
   async decodeTransaction(simulationResult: TxSimulationResult): Promise<{
     callAuthorizations: ReadableCallAuthorization[];
     executionTrace: DecodedExecutionTrace;
   }> {
     const offChainEffects = collectOffchainEffects(
-      simulationResult.privateExecutionResult
+      simulationResult.privateExecutionResult,
     );
 
     // Parse call authorizations from offchain effects
     const callAuthorizations = await Promise.all(
       offChainEffects.map((effect) =>
-        this.formatter.parseCallAuthorizationFromEffect(effect)
-      )
+        this.formatter.parseCallAuthorizationFromEffect(effect),
+      ),
     );
 
     const filteredCallAuthorizations = callAuthorizations.filter(Boolean);
@@ -47,7 +55,7 @@ export class TxDecodingService {
     // Format for display
     const readableCallAuthorizations =
       await this.formatter.formatCallAuthorizationsForDisplay(
-        filteredCallAuthorizations
+        filteredCallAuthorizations,
       );
 
     // Decode execution call stack

@@ -38,8 +38,8 @@ const ArgValueSchema = z.object({
   value: z.string(),
 });
 
-const PublicEnqueueEventSchema: z.ZodType<any> = z.object({
-  type: z.literal("public-enqueue"),
+const PublicCallEventSchema: z.ZodType<any> = z.object({
+  type: z.literal("public-call"),
   depth: z.number(),
   counter: z.number(),
   contract: ContractInfoSchema,
@@ -47,6 +47,7 @@ const PublicEnqueueEventSchema: z.ZodType<any> = z.object({
   caller: ContractInfoSchema,
   isStaticCall: z.boolean(),
   args: z.array(ArgValueSchema),
+  returnValues: z.array(ArgValueSchema).optional(),
 });
 
 const PrivateCallEventSchema: z.ZodType<any> = z.lazy(() =>
@@ -64,7 +65,7 @@ const PrivateCallEventSchema: z.ZodType<any> = z.lazy(() =>
     args: z.array(ArgValueSchema),
     returnValues: z.array(ArgValueSchema),
     nestedEvents: z.array(
-      z.union([PrivateCallEventSchema, PublicEnqueueEventSchema])
+      z.union([PrivateCallEventSchema, PublicCallEventSchema])
     ),
   })
 );
@@ -73,7 +74,7 @@ const DecodedExecutionTraceSchema = z.union([
   // Full transaction trace
   z.object({
     privateExecution: PrivateCallEventSchema,
-    publicExecutionQueue: z.array(PublicEnqueueEventSchema),
+    publicCalls: z.array(PublicCallEventSchema),
   }),
   // Simplified utility trace
   z.object({

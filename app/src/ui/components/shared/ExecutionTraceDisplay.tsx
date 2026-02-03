@@ -2,6 +2,7 @@ import type { DecodedExecutionTrace } from "../../../wallet/decoding/tx-callstac
 import type { ReadableCallAuthorization } from "../../../wallet/decoding/call-authorization-formatter";
 import { FunctionCallDisplay } from "./FunctionCallDisplay";
 import { PrivateCallDisplay } from "./PrivateCallDisplay";
+import { PublicCallDisplay } from "./PublicCallDisplay";
 import {
   TransactionPhaseTimeline,
   type SimulationStats,
@@ -167,10 +168,11 @@ export function ExecutionTraceDisplay({
   // Full transaction trace
   const decodedTrace = trace as DecodedExecutionTrace;
 
-  // Detect optimized public-only simulations (entrypoint with zero address = empty entrypoint from optimizer)
-  const isOptimizedPublicOnly =
-    decodedTrace.privateExecution.contract.address === AztecAddress.ZERO.toString() &&
-    decodedTrace.publicExecutionQueue.length > 0;
+  // Check if this is a public-only simulation (empty/mock private entrypoint)
+  const isPublicOnly =
+    decodedTrace.privateExecution.contract.address === AztecAddress.ZERO.toString();
+
+  const publicCalls = decodedTrace.publicCalls ?? [];
 
   return (
     <>
@@ -186,31 +188,25 @@ export function ExecutionTraceDisplay({
         </Box>
       )}
 
-      {isOptimizedPublicOnly ? (
-        // Show public calls directly for optimized simulations
-        <>
-          {decodedTrace.publicExecutionQueue.map((publicCall, idx) => (
-            <FunctionCallDisplay
-              key={idx}
-              contractName={publicCall.contract.name || "Unknown"}
-              contractAddress={publicCall.contract.address}
-              functionName={publicCall.function}
-              args={publicCall.args}
-              returnValues={[]}
-              typeLabel="Public"
-              isStaticCall={publicCall.isStaticCall}
-              accordionBgColor={accordionBgColor}
-            />
-          ))}
-        </>
-      ) : (
-        // Show normal private execution
+      {/* Show private execution if this is not a public-only simulation */}
+      {/* Public calls are rendered as nested events inside PrivateCallDisplay */}
+      {!isPublicOnly && (
         <PrivateCallDisplay
           call={decodedTrace.privateExecution}
           authorizations={callAuthorizations}
           accordionBgColor={accordionBgColor}
         />
       )}
+
+      {/* For public-only simulations (optimized), render public calls separately */}
+      {isPublicOnly &&
+        publicCalls.map((publicCall, idx) => (
+          <PublicCallDisplay
+            key={idx}
+            call={publicCall}
+            accordionBgColor={accordionBgColor}
+          />
+        ))}
 
       {stats && <SimulationStatsDisplay stats={stats} trace={trace} />}
     </>

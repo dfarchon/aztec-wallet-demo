@@ -16,7 +16,7 @@ import type { DecodingCache } from "./decoding-cache";
 import { Fr } from "@aztec/foundation/curves/bn254";
 import { PRIVATE_CONTEXT_INPUTS_LENGTH } from "@aztec/constants";
 
-export type ExecutionEvent = PrivateCallEvent | PublicEnqueueEvent;
+export type ExecutionEvent = PrivateCallEvent | PublicCallEvent;
 
 export interface PrivateCallEvent {
   type: "private-call";
@@ -31,8 +31,13 @@ export interface PrivateCallEvent {
   nestedEvents: ExecutionEvent[];
 }
 
-export interface PublicEnqueueEvent {
-  type: "public-enqueue";
+/**
+ * Represents a public call - either enqueued during private execution or
+ * executed directly (e.g., optimized public static calls).
+ * Return values are populated when the call has been executed.
+ */
+export interface PublicCallEvent {
+  type: "public-call";
   depth: number;
   counter: number;
   contract: { name: string; address: string };
@@ -40,11 +45,14 @@ export interface PublicEnqueueEvent {
   caller: { name: string; address: string };
   isStaticCall: boolean;
   args: Array<{ name: string; value: string }>;
+  /** Return values - populated when the call has been executed */
+  returnValues?: Array<{ name: string; value: string }>;
 }
 
 export interface DecodedExecutionTrace {
   privateExecution: PrivateCallEvent;
-  publicExecutionQueue: PublicEnqueueEvent[];
+  /** Public calls in execution order. Return values populated if executed. */
+  publicCalls: PublicCallEvent[];
 }
 
 export class TxCallStackDecoder {
@@ -195,10 +203,11 @@ export class TxCallStackDecoder {
         );
       }
     } catch (error) {
-      // If we can't decode, use raw values
+      // If we can't decode, use raw values with consistent naming
+      const rvCount = call.returnValues.length;
       returnValues = await Promise.all(
         call.returnValues.map(async (rv, i) => ({
-          name: `return_${i}`,
+          name: rvCount === 1 ? "result" : `result_${i}`,
           value: rv.toString(),
         })),
       );
@@ -240,7 +249,7 @@ export class TxCallStackDecoder {
         );
 
         for (const enq of enqueuedBefore) {
-          const event = await this.decodePublicEnqueue(
+          const event = await this.decodePublicCall(
             enq.request,
             depth + 1,
             enq.counter,
@@ -268,7 +277,7 @@ export class TxCallStackDecoder {
     );
 
     for (const enq of enqueuedAfter) {
-      const event = await this.decodePublicEnqueue(
+      const event = await this.decodePublicCall(
         enq.request,
         depth + 1,
         enq.counter,
@@ -297,11 +306,11 @@ export class TxCallStackDecoder {
     };
   }
 
-  private async decodePublicEnqueue(
+  private async decodePublicCall(
     request: any,
     depth: number,
     counter: number,
-  ): Promise<PublicEnqueueEvent> {
+  ): Promise<PublicCallEvent> {
     const contractName = await this.cache.getAddressAlias(
       request.contractAddress,
     );
@@ -345,21 +354,18 @@ export class TxCallStackDecoder {
           // Decode arguments - calldata is [selector, ...args]
           if (functionAbi.parameters.length > 0 && calldata.length > 1) {
             const argsData = calldata.slice(1); // Skip the selector
-            args = await this.decodeAndFormatArguments(
-              functionAbi,
-              argsData,
-            );
+            args = await this.decodeAndFormatArguments(functionAbi, argsData);
           }
         }
       } catch (error) {
         // If we can't resolve from ABI, use the selector hex
-        this.log?.error('Failed to resolve function from ABI:', error);
+        this.log?.error("Failed to resolve function from ABI:", error);
         functionName = `0x${functionSelector.toString().slice(2, 10)}`;
       }
     }
 
     return {
-      type: "public-enqueue",
+      type: "public-call",
       depth,
       counter,
       contract: {
@@ -396,26 +402,87 @@ export class TxCallStackDecoder {
     // Decode the private execution tree
     const privateExecution = await this.decodePrivateCall(entrypoint, 0, []);
 
-    // Collect all public enqueues in execution order (by counter)
-    let allPublicEnqueues: PublicEnqueueEvent[] = [];
+    // Collect all public calls in execution order (by counter)
+    let allPublicCalls: PublicCallEvent[] = [];
 
-    const collectPublicEnqueues = (event: ExecutionEvent) => {
-      if (event.type === "public-enqueue") {
-        allPublicEnqueues.push(event);
+    const collectPublicCalls = (event: ExecutionEvent) => {
+      if (event.type === "public-call") {
+        allPublicCalls.push(event);
       } else if (event.type === "private-call") {
-        event.nestedEvents.forEach(collectPublicEnqueues);
+        event.nestedEvents.forEach(collectPublicCalls);
       }
     };
 
-    collectPublicEnqueues(privateExecution);
+    collectPublicCalls(privateExecution);
 
     // Sort by counter to show execution order
-    allPublicEnqueues.sort((a, b) => a.counter - b.counter);
+    allPublicCalls.sort((a, b) => a.counter - b.counter);
+
+    // Populate return values from publicOutput.publicReturnValues
+    const publicReturnValues =
+      simulationResult.publicOutput?.publicReturnValues ?? [];
+
+    for (
+      let i = 0;
+      i < allPublicCalls.length && i < publicReturnValues.length;
+      i++
+    ) {
+      const returnValue = publicReturnValues[i];
+      const publicCall = allPublicCalls[i];
+
+      if (returnValue?.values && returnValue.values.length > 0) {
+        // Try to decode return values using the function ABI
+        publicCall.returnValues = await this.decodePublicCallReturnValues(
+          AztecAddress.fromString(publicCall.contract.address),
+          publicCall.function,
+          returnValue.values,
+        );
+      }
+    }
 
     return {
       privateExecution,
-      publicExecutionQueue: allPublicEnqueues,
+      publicCalls: allPublicCalls,
     };
+  }
+
+  /**
+   * Decode return values for a public call using the function ABI.
+   * Note: returnValues may be Fr instances or serialized values (after IPC).
+   */
+  private async decodePublicCallReturnValues(
+    contractAddress: AztecAddress,
+    functionName: string,
+    returnValues: unknown[],
+  ): Promise<Array<{ name: string; value: string }>> {
+    // Ensure values are proper Fr instances (they may have been serialized)
+    // Use Fr.fromPlainObject which handles various serialized formats
+    const frValues = returnValues.map((v) => Fr.fromPlainObject(v));
+
+    try {
+      const instance = await this.cache.getContractInstance(contractAddress);
+      const artifact = await this.cache.getContractArtifact(
+        instance.currentContractClassId,
+      );
+
+      // Use getAllFunctionAbis to get all functions including non-dispatch public functions
+      const allAbis = getAllFunctionAbis(artifact);
+
+      // Find the function by name
+      const functionAbi = allAbis.find((f) => f.name === functionName);
+
+      if (functionAbi) {
+        return await this.decodeAndFormatReturnValues(functionAbi, frValues);
+      }
+    } catch (error) {
+      this.log?.debug("Could not decode public call return values:", error);
+    }
+
+    // Fallback: return raw values with consistent naming
+    return frValues.map((rv, i) => ({
+      name: frValues.length === 1 ? "result" : `result_${i}`,
+      value: rv.toString(),
+    }));
   }
 
   /**
@@ -474,9 +541,10 @@ export class TxCallStackDecoder {
     // decodeFromAbi returns a single value if there's one return type, or an array for multiple
     const decodedReturns = Array.isArray(decoded) ? decoded : [decoded];
 
+    // Use "result" for single return value (like utilities), indexed names for multiple
     return await Promise.all(
       decodedReturns.map(async (value, i) => ({
-        name: `return_${i}`,
+        name: decodedReturns.length === 1 ? "result" : `result_${i}`,
         value: await this.formatAndResolveValue(value),
       })),
     );
