@@ -164,12 +164,23 @@ export class InternalWallet extends BaseNativeWallet {
       opts.from,
       fee,
     );
+
+    // Helper to format duration
+    const formatDuration = (ms: number): string => {
+      if (ms < 1000) return `${Math.round(ms)}ms`;
+      return `${(ms / 1000).toFixed(1)}s`;
+    };
+
+    // Track proving time
+    const provingStartTime = Date.now();
     await this.interactionManager.storeAndEmit(
       interaction.update({
         status: "PROVING",
       }),
     );
     const provenTx = await this.pxe.proveTx(txRequest);
+    const provingTime = Date.now() - provingStartTime;
+
     const tx = await provenTx.toTx();
     const txHash = tx.getTxHash();
     if (await this.aztecNode.getTxEffect(txHash)) {
@@ -177,6 +188,9 @@ export class InternalWallet extends BaseNativeWallet {
         `A settled tx with equal hash ${txHash.toString()} exists.`,
       );
     }
+
+    // Track sending time
+    const sendingStartTime = Date.now();
     await this.interactionManager.storeAndEmit(
       interaction.update({
         status: "SENDING",
@@ -186,16 +200,30 @@ export class InternalWallet extends BaseNativeWallet {
     await this.aztecNode.sendTx(tx).catch((err) => {
       throw this.contextualizeError(err, inspect(tx));
     });
+    const sendingTime = Date.now() - sendingStartTime;
     this.log.info(`Sent transaction ${txHash}`);
 
     // If wait is NO_WAIT, return txHash immediately
     if (opts.wait === NO_WAIT) {
+      const timingSummary = `Prove: ${formatDuration(provingTime)} | Send: ${formatDuration(sendingTime)}`;
+      await this.interactionManager.storeAndEmit(
+        interaction.update({ description: timingSummary }),
+      );
       return txHash as SendReturn<W>;
     }
 
     // Otherwise, wait for the full receipt (default behavior on wait: undefined)
+    const miningStartTime = Date.now();
     const waitOpts = typeof opts.wait === "object" ? opts.wait : undefined;
-    return (await waitForTx(this.aztecNode, txHash, waitOpts)) as SendReturn<W>;
+    const receipt = await waitForTx(this.aztecNode, txHash, waitOpts);
+    const miningTime = Date.now() - miningStartTime;
+
+    const timingSummary = `Prove: ${formatDuration(provingTime)} | Send: ${formatDuration(sendingTime)} | Mine: ${formatDuration(miningTime)}`;
+    await this.interactionManager.storeAndEmit(
+      interaction.update({ description: timingSummary }),
+    );
+
+    return receipt as SendReturn<W>;
   }
 
   // Internal-only method: Delete account

@@ -68,6 +68,13 @@ const getStatusIcon = (status: string, complete: boolean) => {
   return <CircularProgress size={14} thickness={5} />;
 };
 
+// Check if a transaction has completed proving (status moved past PROVING)
+const isProvenTx = (type: WalletInteractionType, status: string): boolean => {
+  if (type !== "sendTx" && type !== "createAccount") return false;
+  const postProvingStatuses = ["SENDING", "SENT", "MINED", "DEPLOYED"];
+  return postProvingStatuses.some((s) => status.includes(s));
+};
+
 const getInteractionTypeLabel = (type: WalletInteractionType) => {
   const labels: Record<WalletInteractionType, string> = {
     registerContract: "Register Contract",
@@ -277,6 +284,16 @@ export function InteractionsList({
                         )}
                         sx={{ fontSize: "0.7rem", height: 20 }}
                       />
+                      {isProvenTx(interaction.type, interaction.status) && (
+                        <Chip
+                          icon={<CheckCircle fontSize="small" />}
+                          label="Proven"
+                          size="small"
+                          color="success"
+                          variant="outlined"
+                          sx={{ fontSize: "0.7rem", height: 20 }}
+                        />
+                      )}
                     </Box>
                     <Typography
                       variant="body2"
