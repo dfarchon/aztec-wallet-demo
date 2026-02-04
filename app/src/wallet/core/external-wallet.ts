@@ -54,6 +54,7 @@ import { CreateAuthWitOperation } from "../operations/create-authwit-operation";
 import { GetPrivateEventsOperation } from "../operations/get-private-events-operation";
 import { GetContractMetadataOperation } from "../operations/get-contract-metadata-operation";
 import { GetContractClassMetadataOperation } from "../operations/get-contract-class-metadata-operation";
+import { RequestCapabilitiesOperation } from "../operations/request-capabilities-operation";
 import type {
   InteractionWaitOptions,
   SendReturn,
@@ -113,6 +114,7 @@ export class ExternalWallet extends BaseNativeWallet {
       this.decodingCache,
       this.interactionManager,
       this.authorizationManager,
+      this.log,
     );
   }
 
@@ -122,6 +124,7 @@ export class ExternalWallet extends BaseNativeWallet {
   private createSimulateTxOperation(): SimulateTxOperation {
     return new SimulateTxOperation(
       this.pxe,
+      this.aztecNode,
       this.db,
       this.decodingCache,
       this.interactionManager,
@@ -131,6 +134,7 @@ export class ExternalWallet extends BaseNativeWallet {
       this.getFakeAccountDataFor.bind(this),
       this.getChainInfo.bind(this),
       this.cancellableTransactions,
+      this.log,
     );
   }
 
@@ -144,6 +148,7 @@ export class ExternalWallet extends BaseNativeWallet {
     return new SendTxOperation<W>(
       this.pxe,
       this.aztecNode,
+      this.db,
       this.decodingCache,
       this.interactionManager,
       this.authorizationManager,
@@ -249,6 +254,19 @@ export class ExternalWallet extends BaseNativeWallet {
       (id) => super.getContractClassMetadata(id),
       this.interactionManager,
       this.authorizationManager,
+    );
+  }
+
+  /**
+   * Factory method to create a fresh RequestCapabilitiesOperation instance.
+   */
+  private createRequestCapabilitiesOperation(): RequestCapabilitiesOperation {
+    return new RequestCapabilitiesOperation(
+      this.pxe,
+      this.db,
+      this.interactionManager,
+      this.authorizationManager,
+      this.decodingCache,
     );
   }
 
@@ -359,6 +377,13 @@ export class ExternalWallet extends BaseNativeWallet {
     return await op.executeStandalone(id);
   }
 
+  override async requestCapabilities(
+    manifest: import("@aztec/aztec.js/wallet").AppCapabilities,
+  ): Promise<import("@aztec/aztec.js/wallet").WalletCapabilities> {
+    const op = this.createRequestCapabilitiesOperation();
+    return await op.executeStandalone(manifest);
+  }
+
   override async sendTx<W extends InteractionWaitOptions = undefined>(
     executionPayload: ExecutionPayload,
     opts: SendOptions<W>,
@@ -436,6 +461,9 @@ export class ExternalWallet extends BaseNativeWallet {
           break;
         case "getContractClassMetadata":
           operation = this.createGetContractClassMetadataOperation();
+          break;
+        case "requestCapabilities":
+          operation = this.createRequestCapabilitiesOperation();
           break;
         default:
           items.push({

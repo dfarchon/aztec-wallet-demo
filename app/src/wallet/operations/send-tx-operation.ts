@@ -6,7 +6,11 @@ import {
 import type { AztecAddress } from "@aztec/stdlib/aztec-address";
 import { TxHash } from "@aztec/stdlib/tx";
 import type { PXE } from "@aztec/pxe/server";
-import type { ExecutionPayload, TxExecutionRequest } from "@aztec/stdlib/tx";
+import type {
+  ExecutionPayload,
+  TxExecutionRequest,
+  TxProvingResult,
+} from "@aztec/stdlib/tx";
 import { waitForTx, type AztecNode } from "@aztec/aztec.js/node";
 import { inspect } from "util";
 import {
@@ -23,7 +27,11 @@ import {
   generateSimulationTitle,
 } from "../utils/simulation-utils";
 import type { SendOptions } from "@aztec/aztec.js/wallet";
-import { NO_WAIT, type InteractionWaitOptions, type SendReturn } from "@aztec/aztec.js/contracts";
+import {
+  NO_WAIT,
+  type InteractionWaitOptions,
+  type SendReturn,
+} from "@aztec/aztec.js/contracts";
 import type { SimulateTxOperation } from "./simulate-tx-operation";
 import type { AuthWitness } from "@aztec/stdlib/auth-witness";
 import type { CallIntent } from "@aztec/aztec.js/authorization";
@@ -31,11 +39,12 @@ import type { GasSettings } from "@aztec/stdlib/gas";
 import type { FieldsOf } from "@aztec/foundation/types";
 import { serializePrivateExecutionSteps } from "@aztec/stdlib/kernel";
 import type { FeeOptions } from "@aztec/wallet-sdk/base-wallet";
+import type { WalletDB } from "../database/wallet-db";
 
 // Arguments tuple for the operation (with generic for wait type)
 type SendTxArgs<W extends InteractionWaitOptions = undefined> = [
   executionPayload: ExecutionPayload,
-  opts: SendOptions<W>
+  opts: SendOptions<W>,
 ];
 
 // Result type for the operation (conditional based on wait)
@@ -45,6 +54,12 @@ type SendTxResult<W extends InteractionWaitOptions = undefined> = SendReturn<W>;
 interface SendTxExecutionData<W extends InteractionWaitOptions = undefined> {
   txRequest: TxExecutionRequest;
   wait: W;
+  payloadHash: string;
+  simulationTime?: number;
+  // Store simulation result and metadata for persisting after execution
+  simulationResult?: any;
+  from?: string;
+  embeddedPaymentMethodFeePayer?: string;
 }
 
 // Display data for authorization UI
@@ -70,7 +85,9 @@ type SendTxDisplayData = {
  * - Error handling with descriptive status messages
  * - Support for wait options (NO_WAIT for immediate TxHash, or wait for TxReceipt)
  */
-export class SendTxOperation<W extends InteractionWaitOptions = undefined> extends ExternalOperation<
+export class SendTxOperation<
+  W extends InteractionWaitOptions = undefined,
+> extends ExternalOperation<
   SendTxArgs<W>,
   SendTxResult<W>,
   SendTxExecutionData<W>,
@@ -81,6 +98,7 @@ export class SendTxOperation<W extends InteractionWaitOptions = undefined> exten
   constructor(
     private pxe: PXE,
     private aztecNode: AztecNode,
+    private db: WalletDB,
     private decodingCache: DecodingCache,
     interactionManager: InteractionManager,
     private authorizationManager: AuthorizationManager,
@@ -156,7 +174,10 @@ export class SendTxOperation<W extends InteractionWaitOptions = undefined> exten
     // Use simulateTx operation's prepare method (will throw if simulation fails)
     // Note: Strip the 'wait' property since SimulateOptions doesn't have it
     const { wait: _wait, ...simulateOpts } = opts;
-    const prepared = await this.simulateTxOp.prepare(executionPayload, simulateOpts);
+    const prepared = await this.simulateTxOp.prepare(
+      executionPayload,
+      simulateOpts,
+    );
 
     // Decode simulation results
     const { callAuthorizations, executionTrace } =
@@ -200,6 +221,8 @@ export class SendTxOperation<W extends InteractionWaitOptions = undefined> exten
       executionData: {
         txRequest,
         wait: opts.wait,
+        payloadHash,
+        simulationTime: prepared.displayData?.stats?.timings?.total,
       },
     };
   }
@@ -233,11 +256,16 @@ export class SendTxOperation<W extends InteractionWaitOptions = undefined> exten
     ]);
   }
 
-  async execute(executionData: SendTxExecutionData<W>): Promise<SendTxResult<W>> {
+  async execute(
+    executionData: SendTxExecutionData<W>,
+  ): Promise<SendTxResult<W>> {
+    // Track phase timings
+    const provingStartTime = Date.now();
+
     // Report proving stage
     await this.emitProgress("PROVING");
 
-    let provenTx;
+    let provenTx: TxProvingResult;
     try {
       provenTx = await this.pxe.proveTx(executionData.txRequest);
     } catch (provingError: unknown) {
@@ -286,6 +314,9 @@ export class SendTxOperation<W extends InteractionWaitOptions = undefined> exten
       throw provingError;
     }
 
+    // Extract proving stats from the result
+    const provingStats = provenTx.stats;
+
     const tx = await provenTx.toTx();
     const txHash = tx.getTxHash();
 
@@ -297,21 +328,66 @@ export class SendTxOperation<W extends InteractionWaitOptions = undefined> exten
 
     // Report sending stage
     await this.emitProgress("SENDING", `TxHash: ${txHash.toString()}`);
+    const sendingStartTime = Date.now();
 
     await this.aztecNode.sendTx(tx).catch((err) => {
       throw this.contextualizeError(err, inspect(tx));
     });
 
+    const sendingTime = Date.now() - sendingStartTime;
+
+    // Helper to format duration
+    const formatDuration = (ms: number | undefined): string => {
+      if (!ms) return "0ms";
+      if (ms < 1000) return `${Math.round(ms)}ms`;
+      return `${(ms / 1000).toFixed(1)}s`;
+    };
+
+    const provingTime = provingStats.timings.proving;
+    const witgenTime = provingStats.timings.perFunction.reduce(
+      (acc, fn) => acc + fn.time,
+      0,
+    );
+
     // If wait is NO_WAIT, return txHash immediately
     if (executionData.wait === NO_WAIT) {
-      await this.emitProgress("SENT", undefined, true);
+      const timingSummary = `Witgen: ${formatDuration(witgenTime)} | Prove: ${formatDuration(provingTime)} | Send: ${formatDuration(sendingTime)}`;
+      await this.emitProgress("SENT", timingSummary, true);
+      // Store phase timings and proving stats (no mining time since we didn't wait)
+      await this.db.updateTxSimulationWithProvingData(
+        executionData.payloadHash,
+        {
+          simulation: executionData.simulationTime,
+          proving: provingStats.timings.proving,
+          sending: sendingTime,
+        },
+        provingStats,
+      );
       return txHash as SendTxResult<W>;
     }
 
     // Otherwise, wait for the full receipt (default behavior on wait: undefined)
-    const waitOpts = typeof executionData.wait === 'object' ? executionData.wait : undefined;
+    const miningStartTime = Date.now();
+    const waitOpts =
+      typeof executionData.wait === "object" ? executionData.wait : undefined;
     const receipt = await waitForTx(this.aztecNode, txHash, waitOpts);
-    await this.emitProgress("SENT", undefined, true);
+    const miningTime = Date.now() - miningStartTime;
+
+    const timingSummary = `Sim: ${formatDuration(executionData.simulationTime)} | Prove: ${formatDuration(provingTime)} | Send: ${formatDuration(sendingTime)} | Mine: ${formatDuration(miningTime)}`;
+    await this.emitProgress("SENT", timingSummary, true);
+
+    // Store all phase timings including mining and proving stats
+    await this.db.updateTxSimulationWithProvingData(
+      executionData.payloadHash,
+      {
+        simulation: executionData.simulationTime,
+        proving: provingTime,
+        sending: sendingTime,
+        mining: miningTime,
+      },
+      provingStats,
+    );
+
     return receipt as SendTxResult<W>;
   }
 }

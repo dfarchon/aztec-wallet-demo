@@ -4,6 +4,8 @@ import {
   type Aliased,
   type DeployAccountOptions,
   type SendOptions,
+  type GrantedCapability,
+  type AppCapabilities,
 } from "@aztec/aztec.js/wallet";
 import { type Fr } from "@aztec/aztec.js/fields";
 import type { AccountType } from "../database/wallet-db";
@@ -162,12 +164,23 @@ export class InternalWallet extends BaseNativeWallet {
       opts.from,
       fee,
     );
+
+    // Helper to format duration
+    const formatDuration = (ms: number): string => {
+      if (ms < 1000) return `${Math.round(ms)}ms`;
+      return `${(ms / 1000).toFixed(1)}s`;
+    };
+
+    // Track proving time
+    const provingStartTime = Date.now();
     await this.interactionManager.storeAndEmit(
       interaction.update({
         status: "PROVING",
       }),
     );
     const provenTx = await this.pxe.proveTx(txRequest);
+    const provingTime = Date.now() - provingStartTime;
+
     const tx = await provenTx.toTx();
     const txHash = tx.getTxHash();
     if (await this.aztecNode.getTxEffect(txHash)) {
@@ -175,6 +188,9 @@ export class InternalWallet extends BaseNativeWallet {
         `A settled tx with equal hash ${txHash.toString()} exists.`,
       );
     }
+
+    // Track sending time
+    const sendingStartTime = Date.now();
     await this.interactionManager.storeAndEmit(
       interaction.update({
         status: "SENDING",
@@ -184,16 +200,30 @@ export class InternalWallet extends BaseNativeWallet {
     await this.aztecNode.sendTx(tx).catch((err) => {
       throw this.contextualizeError(err, inspect(tx));
     });
+    const sendingTime = Date.now() - sendingStartTime;
     this.log.info(`Sent transaction ${txHash}`);
 
     // If wait is NO_WAIT, return txHash immediately
     if (opts.wait === NO_WAIT) {
+      const timingSummary = `Prove: ${formatDuration(provingTime)} | Send: ${formatDuration(sendingTime)}`;
+      await this.interactionManager.storeAndEmit(
+        interaction.update({ description: timingSummary }),
+      );
       return txHash as SendReturn<W>;
     }
 
     // Otherwise, wait for the full receipt (default behavior on wait: undefined)
+    const miningStartTime = Date.now();
     const waitOpts = typeof opts.wait === "object" ? opts.wait : undefined;
-    return (await waitForTx(this.aztecNode, txHash, waitOpts)) as SendReturn<W>;
+    const receipt = await waitForTx(this.aztecNode, txHash, waitOpts);
+    const miningTime = Date.now() - miningStartTime;
+
+    const timingSummary = `Prove: ${formatDuration(provingTime)} | Send: ${formatDuration(sendingTime)} | Mine: ${formatDuration(miningTime)}`;
+    await this.interactionManager.storeAndEmit(
+      interaction.update({ description: timingSummary }),
+    );
+
+    return receipt as SendReturn<W>;
   }
 
   // Internal-only method: Delete account
@@ -210,6 +240,13 @@ export class InternalWallet extends BaseNativeWallet {
     | {
         trace?: DecodedExecutionTrace;
         stats?: any;
+        provingStats?: any;
+        phaseTimings?: {
+          simulation?: number;
+          proving?: number;
+          sending?: number;
+          mining?: number;
+        };
         from?: string;
         embeddedPaymentMethodFeePayer?: string;
       }
@@ -231,7 +268,7 @@ export class InternalWallet extends BaseNativeWallet {
     }
 
     // Use the shared decoding cache from BaseNativeWallet
-    const decodingService = new TxDecodingService(this.decodingCache);
+    const decodingService = new TxDecodingService(this.decodingCache, this.log);
     const parsedSimulationResult = TxSimulationResult.schema.parse(
       data.simulationResult,
     );
@@ -242,6 +279,8 @@ export class InternalWallet extends BaseNativeWallet {
     return {
       trace: executionTrace,
       stats: parsedSimulationResult.stats,
+      provingStats: data.metadata?.provingStats,
+      phaseTimings: data.metadata?.phaseTimings,
       from: data.metadata?.from,
       embeddedPaymentMethodFeePayer:
         data.metadata?.embeddedPaymentMethodFeePayer,
@@ -253,18 +292,20 @@ export class InternalWallet extends BaseNativeWallet {
     return await this.db.listAuthorizedApps();
   }
 
-  async getAppAuthorizations(appId: string): Promise<{
-    accounts: { alias: string; item: string }[];
-    contacts: { alias: string; item: string }[];
-    simulations: Array<{
-      type: "simulateTx" | "simulateUtility";
-      payloadHash: string;
-      title?: string;
-      key: string;
-    }>;
-    otherMethods: string[];
-  }> {
-    return await this.db.getAppAuthorizations(appId);
+  async getAppCapabilities(appId: string): Promise<GrantedCapability[]> {
+    return await this.db.reconstructCapabilitiesFromKeys(appId);
+  }
+
+  async capabilityToStorageKeys(capability: GrantedCapability): Promise<string[]> {
+    return this.db.capabilityToStorageKeys(capability);
+  }
+
+  async storeCapabilityGrants(
+    appId: string,
+    manifest: AppCapabilities,
+    granted: GrantedCapability[]
+  ): Promise<void> {
+    await this.db.storeCapabilityGrants(appId, granted);
   }
 
   async updateAccountAuthorization(

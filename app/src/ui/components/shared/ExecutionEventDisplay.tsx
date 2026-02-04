@@ -3,7 +3,7 @@ import type {
 } from "../../../wallet/decoding/tx-callstack-decoder";
 import type { ReadableCallAuthorization } from "../../../wallet/decoding/call-authorization-formatter";
 import { PrivateCallDisplay } from "./PrivateCallDisplay";
-import { PublicEnqueueDisplay } from "./PublicEnqueueDisplay";
+import { PublicCallDisplay } from "./PublicCallDisplay";
 
 export interface ExecutionEventDisplayProps {
   event: ExecutionEvent;
@@ -25,6 +25,11 @@ export function ExecutionEventDisplay({
       />
     );
   } else {
-    return <PublicEnqueueDisplay enqueue={event} />;
+    return (
+      <PublicCallDisplay
+        call={event}
+        accordionBgColor={accordionBgColor}
+      />
+    );
   }
 }

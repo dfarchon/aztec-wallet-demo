@@ -9,12 +9,19 @@ import Alert from "@mui/material/Alert";
 import { AztecAddress } from "@aztec/stdlib/aztec-address";
 import { ExecutionTraceDisplay } from "../shared/ExecutionTraceDisplay";
 import type { DecodedExecutionTrace } from "../../../wallet/decoding/tx-callstack-decoder";
+import type {
+  SimulationStats,
+  ProvingStats,
+  StoredPhaseTimings,
+} from "../shared/PhaseTimeline";
 
 interface ExecutionTraceDialogProps {
   open: boolean;
   onClose: () => void;
   trace: DecodedExecutionTrace | null;
-  stats?: any;
+  stats?: SimulationStats;
+  provingStats?: ProvingStats;
+  phaseTimings?: StoredPhaseTimings;
   from?: string | null;
   embeddedPaymentMethodFeePayer?: string | null;
 }
@@ -24,6 +31,8 @@ export function ExecutionTraceDialog({
   onClose,
   trace,
   stats,
+  provingStats,
+  phaseTimings,
   from,
   embeddedPaymentMethodFeePayer,
 }: ExecutionTraceDialogProps) {
@@ -77,6 +86,8 @@ export function ExecutionTraceDialog({
           trace={trace}
           accordionBgColor="background.default"
           stats={stats}
+          provingStats={provingStats}
+          phaseTimings={phaseTimings}
         />
       </DialogContent>
       <DialogActions>

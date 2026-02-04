@@ -81,7 +81,8 @@ export class SimulateUtilityOperation extends ExternalOperation<
     private db: WalletDB,
     private decodingCache: DecodingCache,
     interactionManager: InteractionManager,
-    private authorizationManager: AuthorizationManager
+    private authorizationManager: AuthorizationManager,
+    private log?: any,
   ) {
     super();
     this.interactionManager = interactionManager;
@@ -149,7 +150,7 @@ export class SimulateUtilityOperation extends ExternalOperation<
     // Format arguments and result using the TxCallStackDecoder
     // Note: UtilitySimulationResult.result is now Fr[] (raw field elements)
     // We need to decode them using the function's return type ABI
-    const decoder = new TxCallStackDecoder(this.decodingCache);
+    const decoder = new TxCallStackDecoder(this.decodingCache, this.log);
 
     // Format the input arguments (these come from FunctionCall.args which are already typed)
     const decodedArgs = await decoder.formatUtilityArguments(
@@ -183,6 +184,9 @@ export class SimulateUtilityOperation extends ExternalOperation<
       simulationResult.stats
     );
 
+    // Generate storage key for capability matching based on contract:function pattern
+    const storageKey = `simulateUtility:${call.to.toString()}:${call.name}`;
+
     return {
       displayData: {
         payloadHash,
@@ -193,7 +197,7 @@ export class SimulateUtilityOperation extends ExternalOperation<
       },
       executionData: { simulationResult, executionTrace, payloadHash },
       persistence: {
-        storageKey: `simulateUtility:${payloadHash}`,
+        storageKey,
         persistData: { title },
       },
     };

@@ -1,16 +1,16 @@
 import { jsonStringify } from "@aztec/foundation/json-rpc";
-import { type Aliased } from "@aztec/aztec.js/wallet";
+import { type Aliased, type AppCapabilities } from "@aztec/aztec.js/wallet";
 import { type AztecAddress } from "@aztec/aztec.js/addresses";
 
 // Base authorization item - represents a single authorization request
-export type AuthorizationItem = {
+export type AuthorizationItem<TParams = any> = {
   id: string;
   appId: string;
   method: string;
-  params: any;
+  params: TParams;
   timestamp: number;
   persistence?: {
-    storageKey: string;
+    storageKey: string | string[]; // Single key or multiple keys for batch operations
     persistData: any;
   };
 };
@@ -53,6 +53,15 @@ export type SimulateAuthData = {
 
 // Deprecated: use SimulateAuthData instead
 export type SimulateTxAuthData = SimulateAuthData;
+
+// Authorization params types (what gets passed to the UI)
+export type RequestCapabilitiesParams = {
+  manifest: AppCapabilities;
+  newCapabilityIndices: number[];
+  contractNames: Record<string, string>;
+  existingGrants: Record<string, boolean>;
+  isAppFirstTime: boolean;
+};
 
 // Union of all possible authorization data types
 export type AuthorizationData =
