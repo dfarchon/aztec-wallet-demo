@@ -33,7 +33,7 @@ export const NETWORKS: NetworkConfig[] = [
     id: "nextnet",
     name: "Nextnet",
     chainId: 11155111,
-    version: 3083048591,
+    version: 1478105884,
     description: "Aztec Labs Nextnet",
     color: "#f321c9",
     nodeUrl: "https://nextnet.aztec-labs.com/",

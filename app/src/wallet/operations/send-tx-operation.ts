@@ -6,7 +6,11 @@ import {
 import type { AztecAddress } from "@aztec/stdlib/aztec-address";
 import { TxHash } from "@aztec/stdlib/tx";
 import type { PXE } from "@aztec/pxe/server";
-import type { ExecutionPayload, TxExecutionRequest } from "@aztec/stdlib/tx";
+import type {
+  ExecutionPayload,
+  TxExecutionRequest,
+  TxProvingResult,
+} from "@aztec/stdlib/tx";
 import { waitForTx, type AztecNode } from "@aztec/aztec.js/node";
 import { inspect } from "util";
 import {
@@ -261,7 +265,7 @@ export class SendTxOperation<
     // Report proving stage
     await this.emitProgress("PROVING");
 
-    let provenTx;
+    let provenTx: TxProvingResult;
     try {
       provenTx = await this.pxe.proveTx(executionData.txRequest);
     } catch (provingError: unknown) {
@@ -310,7 +314,6 @@ export class SendTxOperation<
       throw provingError;
     }
 
-    const provingTime = Date.now() - provingStartTime;
     // Extract proving stats from the result
     const provingStats = provenTx.stats;
 
@@ -340,16 +343,22 @@ export class SendTxOperation<
       return `${(ms / 1000).toFixed(1)}s`;
     };
 
+    const provingTime = provingStats.timings.proving;
+    const witgenTime = provingStats.timings.perFunction.reduce(
+      (acc, fn) => acc + fn.time,
+      0,
+    );
+
     // If wait is NO_WAIT, return txHash immediately
     if (executionData.wait === NO_WAIT) {
-      const timingSummary = `Sim: ${formatDuration(executionData.simulationTime)} | Prove: ${formatDuration(provingTime)} | Send: ${formatDuration(sendingTime)}`;
+      const timingSummary = `Witgen: ${formatDuration(witgenTime)} | Prove: ${formatDuration(provingTime)} | Send: ${formatDuration(sendingTime)}`;
       await this.emitProgress("SENT", timingSummary, true);
       // Store phase timings and proving stats (no mining time since we didn't wait)
       await this.db.updateTxSimulationWithProvingData(
         executionData.payloadHash,
         {
           simulation: executionData.simulationTime,
-          proving: provingTime,
+          proving: provingStats.timings.proving,
           sending: sendingTime,
         },
         provingStats,

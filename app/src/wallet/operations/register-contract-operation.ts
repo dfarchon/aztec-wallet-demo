@@ -73,9 +73,18 @@ export class RegisterContractOperation extends ExternalOperation<
 
   async check(
     instance: ContractInstanceWithAddress,
-    _artifact?: ContractArtifact,
+    artifact?: ContractArtifact,
     _secretKey?: Fr,
   ): Promise<RegisterContractResult | undefined> {
+    // Cache artifact early for batch operations
+    // Uses instance.currentContractClassId as key (no expensive computation)
+    if (artifact && instance.currentContractClassId) {
+      this.decodingCache.cacheArtifactForBatch(
+        instance.currentContractClassId,
+        artifact,
+      );
+    }
+
     // Resolve contract address
     const contractAddress = instance.address;
 
@@ -128,15 +137,6 @@ export class RegisterContractOperation extends ExternalOperation<
   > {
     // Resolve contract address
     const contractAddress = instance.address;
-
-    // CRITICAL FOR BATCH OPERATIONS:
-    // If artifact is provided, cache it in the decoding cache so that subsequent
-    // operations in the same batch can use it for display purposes.
-    // This is safe because it's just a temporary cache for decoding, not registration.
-    if (artifact) {
-      const contractClass = await getContractClassFromArtifact(artifact);
-      this.decodingCache.cacheArtifactForBatch(contractClass.id, artifact);
-    }
 
     // Resolve contract name for display
     // This will now use the batch-cached artifacts if available

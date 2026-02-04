@@ -43,7 +43,7 @@ interface FunctionTiming {
 
 /** Timings structure from simulation/proving stats */
 interface StatsTimings {
-  sync: number;
+  sync?: number;
   publicSimulation?: number;
   validation?: number;
   perFunction: FunctionTiming[];
@@ -310,7 +310,6 @@ export class WalletDB {
     }
     return JSON.parse(result.toString());
   }
-
 
   /**
    * Store capability grants by translating them to persistent authorization entries.
@@ -590,14 +589,26 @@ export class WalletDB {
     }
 
     // Group keys by method to reconstruct capabilities
-    const accountKeys = keys.filter((k) => k === "getAccounts" || k === "createAuthWit");
-    const contractKeys = keys.filter((k) => k.startsWith("registerContract:") || k.startsWith("getContractMetadata:"));
-    const contractClassKeys = keys.filter((k) => k.startsWith("getContractClassMetadata:"));
+    const accountKeys = keys.filter(
+      (k) => k === "getAccounts" || k === "createAuthWit",
+    );
+    const contractKeys = keys.filter(
+      (k) =>
+        k.startsWith("registerContract:") ||
+        k.startsWith("getContractMetadata:"),
+    );
+    const contractClassKeys = keys.filter((k) =>
+      k.startsWith("getContractClassMetadata:"),
+    );
     const simulateTxKeys = keys.filter((k) => k.startsWith("simulateTx:"));
-    const simulateUtilityKeys = keys.filter((k) => k.startsWith("simulateUtility:"));
+    const simulateUtilityKeys = keys.filter((k) =>
+      k.startsWith("simulateUtility:"),
+    );
     const sendTxKeys = keys.filter((k) => k.startsWith("sendTx:"));
     const addressBookKeys = keys.filter((k) => k === "getAddressBook");
-    const privateEventsKeys = keys.filter((k) => k.startsWith("getPrivateEvents:"));
+    const privateEventsKeys = keys.filter((k) =>
+      k.startsWith("getPrivateEvents:"),
+    );
 
     // Reconstruct AccountsCapability
     if (accountKeys.length > 0) {
@@ -607,10 +618,16 @@ export class WalletDB {
       // Fetch accounts from stored data
       let accounts: Array<{ alias: string; item: AztecAddress }> = [];
       if (canGet) {
-        const data = await this.retrievePersistentAuthorization(appId, "getAccounts");
+        const data = await this.retrievePersistentAuthorization(
+          appId,
+          "getAccounts",
+        );
         accounts = (data?.accounts || []).map((acc: any) => ({
           alias: acc.alias,
-          item: typeof acc.item === 'string' ? AztecAddress.fromString(acc.item) : acc.item,
+          item:
+            typeof acc.item === "string"
+              ? AztecAddress.fromString(acc.item)
+              : acc.item,
         }));
       }
 
@@ -624,8 +641,12 @@ export class WalletDB {
 
     // Reconstruct ContractsCapability (group by register/metadata)
     if (contractKeys.length > 0) {
-      const registerKeys = contractKeys.filter((k) => k.startsWith("registerContract:"));
-      const metadataKeys = contractKeys.filter((k) => k.startsWith("getContractMetadata:"));
+      const registerKeys = contractKeys.filter((k) =>
+        k.startsWith("registerContract:"),
+      );
+      const metadataKeys = contractKeys.filter((k) =>
+        k.startsWith("getContractMetadata:"),
+      );
 
       // Extract unique contract addresses
       const registerAddrs = new Set(registerKeys.map((k) => k.split(":")[1]));
@@ -635,8 +656,10 @@ export class WalletDB {
       const allAddrs = new Set([...registerAddrs, ...metadataAddrs]);
 
       const contracts = allAddrs.has("*")
-        ? "*" as const
-        : Array.from(allAddrs).filter((a) => a !== "*").map((a) => AztecAddress.fromString(a));
+        ? ("*" as const)
+        : Array.from(allAddrs)
+            .filter((a) => a !== "*")
+            .map((a) => AztecAddress.fromString(a));
 
       capabilities.push({
         type: "contracts",
@@ -650,7 +673,7 @@ export class WalletDB {
     if (contractClassKeys.length > 0) {
       const classIds = contractClassKeys.map((k) => k.split(":")[1]);
       const classes = classIds.includes("*")
-        ? "*" as const
+        ? ("*" as const)
         : classIds.filter((c) => c !== "*").map((c) => Fr.fromString(c));
 
       capabilities.push({
@@ -672,7 +695,10 @@ export class WalletDB {
           // Extract patterns: simulateTx:contract:function
           const patterns = simulateTxKeys.map((k) => {
             const parts = k.split(":");
-            const contract = parts[1] === "*" ? "*" as const : AztecAddress.fromString(parts[1]);
+            const contract =
+              parts[1] === "*"
+                ? ("*" as const)
+                : AztecAddress.fromString(parts[1]);
             const func = parts[2] || "*";
             return { contract, function: func };
           });
@@ -681,13 +707,18 @@ export class WalletDB {
       }
 
       if (simulateUtilityKeys.length > 0) {
-        const hasWildcard = simulateUtilityKeys.some((k) => k === "simulateUtility:*");
+        const hasWildcard = simulateUtilityKeys.some(
+          (k) => k === "simulateUtility:*",
+        );
         if (hasWildcard) {
           simCap.utilities = { scope: "*" as const };
         } else {
           const patterns = simulateUtilityKeys.map((k) => {
             const parts = k.split(":");
-            const contract = parts[1] === "*" ? "*" as const : AztecAddress.fromString(parts[1]);
+            const contract =
+              parts[1] === "*"
+                ? ("*" as const)
+                : AztecAddress.fromString(parts[1]);
             const func = parts[2] || "*";
             return { contract, function: func };
           });
@@ -709,7 +740,10 @@ export class WalletDB {
       } else {
         const patterns = sendTxKeys.map((k) => {
           const parts = k.split(":");
-          const contract = parts[1] === "*" ? "*" as const : AztecAddress.fromString(parts[1]);
+          const contract =
+            parts[1] === "*"
+              ? ("*" as const)
+              : AztecAddress.fromString(parts[1]);
           const func = parts[2] || "*";
           return { contract, function: func };
         });
@@ -726,10 +760,16 @@ export class WalletDB {
 
       if (addressBookKeys.length > 0) {
         // Fetch contacts from stored data
-        const data = await this.retrievePersistentAuthorization(appId, "getAddressBook");
+        const data = await this.retrievePersistentAuthorization(
+          appId,
+          "getAddressBook",
+        );
         const contacts = (data?.contacts || []).map((contact: any) => ({
           alias: contact.alias,
-          item: typeof contact.item === 'string' ? AztecAddress.fromString(contact.item) : contact.item,
+          item:
+            typeof contact.item === "string"
+              ? AztecAddress.fromString(contact.item)
+              : contact.item,
         }));
         dataCap.addressBook = { contacts };
       }
@@ -737,8 +777,10 @@ export class WalletDB {
       if (privateEventsKeys.length > 0) {
         const contractAddrs = privateEventsKeys.map((k) => k.split(":")[1]);
         const contracts = contractAddrs.includes("*")
-          ? "*" as const
-          : contractAddrs.filter((c) => c !== "*").map((c) => AztecAddress.fromString(c));
+          ? ("*" as const)
+          : contractAddrs
+              .filter((c) => c !== "*")
+              .map((c) => AztecAddress.fromString(c));
 
         dataCap.privateEvents = { contracts };
       }
@@ -893,9 +935,7 @@ export class WalletDB {
       metadata,
     });
     await this.txSimulations.set(payloadHash, data);
-    this.logger.debug(
-      `Phase timings updated for payload hash ${payloadHash}`,
-    );
+    this.logger.debug(`Phase timings updated for payload hash ${payloadHash}`);
   }
 
   async storeUtilityTrace(payloadHash: string, trace: any, stats?: any) {
