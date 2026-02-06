@@ -4,7 +4,7 @@
  * Update demo-wallet to the latest Aztec nightly version.
  *
  * Usage:
- *   node scripts/update-to-nightly.js [--version VERSION] [--rollup-version VERSION] [--skip-aztec-up]
+ *   node scripts/update-to-nightly.js [--version VERSION] [--rollup-version VERSION]
  */
 
 import { readFileSync, writeFileSync } from "fs";
@@ -57,18 +57,20 @@ async function fetchLatestNightly() {
 async function fetchRollupVersion() {
   log(COLORS.yellow, "Fetching rollup version from nextnet...");
   try {
-    const output = exec(
-      "curl -s https://nextnet.aztec-labs.com/status | jq -r '.l2ContractAddresses.rollupAddress.version'",
-      { silent: true }
-    );
-    const version = output.trim();
-    if (!version || version === "null") {
-      throw new Error("Failed to fetch rollup version");
+    const res = await fetch("https://nextnet.aztec-labs.com/", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "node_getNodeInfo", params: [] }),
+    });
+    const json = await res.json();
+    const version = json.result?.rollupVersion;
+    if (!version) {
+      throw new Error("rollupVersion not found in response");
     }
     log(COLORS.green, `Fetched rollup version: ${version}`);
-    return version;
+    return String(version);
   } catch (error) {
-    log(COLORS.red, "Failed to fetch rollup version from nextnet");
+    log(COLORS.red, `Failed to fetch rollup version from nextnet: ${error.message}`);
     return null;
   }
 }
@@ -83,53 +85,26 @@ function updatePackageJson(path, version) {
 }
 
 function updateAppPackageJson(version) {
-  log(COLORS.yellow, "[1/5] Updating app/package.json...");
+  log(COLORS.yellow, "[1/4] Updating app/package.json...");
   updatePackageJson(resolve(ROOT, "app/package.json"), version);
   log(COLORS.green, "✓ app/package.json updated\n");
 }
 
 function updateExtensionPackageJson(version) {
-  log(COLORS.yellow, "[2/5] Updating extension/package.json...");
+  log(COLORS.yellow, "[2/4] Updating extension/package.json...");
   updatePackageJson(resolve(ROOT, "extension/package.json"), version);
   log(COLORS.green, "✓ extension/package.json updated\n");
 }
 
 function installDependencies() {
-  log(COLORS.yellow, "[3/5] Running yarn install in app/ and extension/...");
+  log(COLORS.yellow, "[3/4] Running yarn install in app/ and extension/...");
   exec("yarn install", { cwd: resolve(ROOT, "app") });
   exec("yarn install", { cwd: resolve(ROOT, "extension") });
   log(COLORS.green, "✓ Dependencies installed\n");
 }
 
-function installAztecCLI(version) {
-  log(COLORS.yellow, `[4/5] Installing Aztec CLI version ${version}...`);
-
-  const isCI = !!process.env.CI;
-
-  if (isCI) {
-    // CI environment - use direct curl install
-    log(COLORS.yellow, `Running version-specific installer for ${version}...`);
-    process.env.FOUNDRY_DIR = `${process.env.HOME}/.foundry`;
-    exec(`curl -fsSL "https://install.aztec.network/${version}/install" | VERSION="${version}" bash`);
-
-    // Update PATH for current session
-    process.env.PATH = `${process.env.HOME}/.aztec/versions/${version}/bin:${process.env.PATH}`;
-    process.env.PATH = `${process.env.HOME}/.aztec/versions/${version}/node_modules/.bin:${process.env.PATH}`;
-    log(COLORS.green, "✓ Aztec CLI installed (CI mode)\n");
-  } else {
-    // Local environment with aztec-up
-    try {
-      exec("command -v aztec-up", { silent: true });
-      exec(`aztec-up install ${version}`);
-      log(COLORS.green, "✓ Aztec CLI updated\n");
-    } catch {
-      log(COLORS.red, `Warning: aztec-up not found in PATH. Please install manually with: aztec-up install ${version}\n`);
-    }
-  }
-}
-
 function updateRollupVersion(rollupVersion) {
-  log(COLORS.yellow, `[5/5] Updating nextnet rollup version to ${rollupVersion}...`);
+  log(COLORS.yellow, `[4/4] Updating nextnet rollup version to ${rollupVersion}...`);
   const networksFile = resolve(ROOT, "app/src/config/networks.ts");
   let content = readFileSync(networksFile, "utf-8");
 
@@ -157,7 +132,6 @@ async function main() {
   const args = process.argv.slice(2);
   let version = null;
   let rollupVersion = null;
-  let skipAztecUp = false;
 
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--version" && args[i + 1]) {
@@ -166,14 +140,11 @@ async function main() {
     } else if (args[i] === "--rollup-version" && args[i + 1]) {
       rollupVersion = args[i + 1];
       i++;
-    } else if (args[i] === "--skip-aztec-up") {
-      skipAztecUp = true;
     } else if (args[i] === "--help") {
       console.log("Usage: node scripts/update-to-nightly.js [OPTIONS]");
       console.log("\nOptions:");
       console.log("  --version VERSION              Specify nightly version (e.g., 4.0.0-nightly.20260206)");
       console.log("  --rollup-version VERSION       Specify rollup version for nextnet");
-      console.log("  --skip-aztec-up                Skip Aztec CLI installation");
       console.log("  --help                         Show this help message");
       process.exit(0);
     }
@@ -197,18 +168,10 @@ async function main() {
   updateExtensionPackageJson(version);
   installDependencies();
 
-  if (!skipAztecUp) {
-    installAztecCLI(version);
-  } else {
-    log(COLORS.yellow, "[4/5] Skipping Aztec CLI installation (--skip-aztec-up flag set)\n");
-  }
-
   if (rollupVersion) {
     updateRollupVersion(rollupVersion);
   } else {
-    log(COLORS.yellow, "[5/5] No rollup version specified (use --rollup-version to update)");
-    log(COLORS.yellow, "To get the rollup version from nextnet, run:");
-    log(COLORS.yellow, "  curl -s https://nextnet.aztec-labs.com/status | jq -r '.l2ContractAddresses.rollupAddress.version'\n");
+    log(COLORS.yellow, "[4/4] Could not fetch rollup version (use --rollup-version to set manually)\n");
   }
 
   log(COLORS.green, "=== Update Complete ===");

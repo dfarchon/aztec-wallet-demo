@@ -2,8 +2,8 @@ name: Update to Latest Nightly
 
 on:
   schedule:
-    # Run daily at 2 AM UTC
-    - cron: '0 2 * * *'
+    # Run daily at 6 AM UTC (after nextnet deploys at 5 AM)
+    - cron: '0 6 * * *'
   workflow_dispatch:
     inputs:
       version:
@@ -38,17 +38,6 @@ jobs:
       - name: Enable Corepack
         run: corepack enable
 
-      - name: Install jq
-        run: sudo apt-get update && sudo apt-get install -y jq
-
-      - name: Fetch rollup version from nextnet
-        id: rollup
-        if: inputs.rollup_version == ''
-        run: |
-          ROLLUP_VERSION=$(curl -s https://nextnet.aztec-labs.com/status | jq -r '.l2ContractAddresses.rollupAddress.version')
-          echo "version=$ROLLUP_VERSION" >> $GITHUB_OUTPUT
-          echo "Fetched rollup version: $ROLLUP_VERSION"
-
       - name: Run update script
         env:
           CI: 1
@@ -59,13 +48,8 @@ jobs:
             ARGS="$ARGS --version ${{ inputs.version }}"
           fi
 
-          ROLLUP_VERSION="${{ inputs.rollup_version }}"
-          if [ -z "$ROLLUP_VERSION" ]; then
-            ROLLUP_VERSION="${{ steps.rollup.outputs.version }}"
-          fi
-
-          if [ -n "$ROLLUP_VERSION" ]; then
-            ARGS="$ARGS --rollup-version $ROLLUP_VERSION"
+          if [ -n "${{ inputs.rollup_version }}" ]; then
+            ARGS="$ARGS --rollup-version ${{ inputs.rollup_version }}"
           fi
 
           node scripts/update-to-nightly.js $ARGS
@@ -73,7 +57,7 @@ jobs:
       - name: Get updated version
         id: version
         run: |
-          VERSION=$(jq -r '.dependencies["@aztec/wallet-sdk"]' app/package.json)
+          VERSION=$(node -e "const p = JSON.parse(require('fs').readFileSync('app/package.json','utf-8')); console.log(p.dependencies['@aztec/wallet-sdk'])")
           echo "version=$VERSION" >> $GITHUB_OUTPUT
 
       - name: Create Pull Request
@@ -87,7 +71,7 @@ jobs:
             **Changes:**
             - Updated all @aztec/* dependencies in app/package.json
             - Updated @aztec/wallet-sdk in extension/package.json
-            - Updated nextnet rollup version: ${{ steps.rollup.outputs.version || inputs.rollup_version }}
+            - Updated nextnet rollup version (auto-fetched from nextnet node)
 
             **Note:** This PR was created automatically by the update-nightly workflow.
           branch: automated-nightly-update-${{ steps.version.outputs.version }}

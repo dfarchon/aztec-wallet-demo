@@ -25,7 +25,7 @@ node scripts/update-to-nightly.js --version 4.0.0-nightly.20260206            # 
 node scripts/update-to-nightly.js --rollup-version 3863723750                  # set nextnet rollup version
 ```
 
-Updates `@aztec/*` deps in `app/` and `extension/`, runs `yarn install`, and optionally updates the nextnet rollup version in `networks.ts`. Use `--skip-aztec-up` to skip Aztec CLI installation. In CI (`CI=1`), installs Aztec via curl instead of aztec-up.
+Updates `@aztec/*` deps in `app/` and `extension/`, runs `yarn install`, and auto-fetches the nextnet rollup version to update `networks.ts`.
 
 ## Development Setup
 
