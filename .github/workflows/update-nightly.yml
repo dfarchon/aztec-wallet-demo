@@ -1,0 +1,95 @@
+name: Update to Latest Nightly
+
+on:
+  schedule:
+    # Run daily at 2 AM UTC
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Nightly version (e.g., 4.0.0-nightly.20260206)'
+        required: false
+        type: string
+      rollup_version:
+        description: 'Rollup version for nextnet (e.g., 3863723750)'
+        required: false
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  update-nightly:
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/next'
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: next
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Install jq
+        run: sudo apt-get update && sudo apt-get install -y jq
+
+      - name: Fetch rollup version from nextnet
+        id: rollup
+        if: inputs.rollup_version == ''
+        run: |
+          ROLLUP_VERSION=$(curl -s https://nextnet.aztec-labs.com/status | jq -r '.l2ContractAddresses.rollupAddress.version')
+          echo "version=$ROLLUP_VERSION" >> $GITHUB_OUTPUT
+          echo "Fetched rollup version: $ROLLUP_VERSION"
+
+      - name: Run update script
+        env:
+          CI: 1
+        run: |
+          ARGS=""
+
+          if [ -n "${{ inputs.version }}" ]; then
+            ARGS="$ARGS --version ${{ inputs.version }}"
+          fi
+
+          ROLLUP_VERSION="${{ inputs.rollup_version }}"
+          if [ -z "$ROLLUP_VERSION" ]; then
+            ROLLUP_VERSION="${{ steps.rollup.outputs.version }}"
+          fi
+
+          if [ -n "$ROLLUP_VERSION" ]; then
+            ARGS="$ARGS --rollup-version $ROLLUP_VERSION"
+          fi
+
+          node scripts/update-to-nightly.js $ARGS
+
+      - name: Get updated version
+        id: version
+        run: |
+          VERSION=$(jq -r '.dependencies["@aztec/wallet-sdk"]' app/package.json)
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Create Pull Request
+        uses: peter-evans/create-pull-request@v7
+        with:
+          commit-message: "chore: update to ${{ steps.version.outputs.version }}"
+          title: "chore: update to ${{ steps.version.outputs.version }}"
+          body: |
+            Automated update to Aztec nightly version ${{ steps.version.outputs.version }}
+
+            **Changes:**
+            - Updated all @aztec/* dependencies in app/package.json
+            - Updated @aztec/wallet-sdk in extension/package.json
+            - Updated nextnet rollup version: ${{ steps.rollup.outputs.version || inputs.rollup_version }}
+
+            **Note:** This PR was created automatically by the update-nightly workflow.
+          branch: automated-nightly-update-${{ steps.version.outputs.version }}
+          delete-branch: true
+          base: next

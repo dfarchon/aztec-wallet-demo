@@ -139,7 +139,7 @@ export class PublicViewOptimizer {
 
   constructor(
     private node: AztecNode,
-    private decodingCache: DecodingCache,
+    decodingCache: DecodingCache,
     private log: Logger,
   ) {
     this.contractStore = new MinimalContractStore(decodingCache);
@@ -211,7 +211,6 @@ export class PublicViewOptimizer {
       >,
       publicStaticCalls.length, // claimed length is the actual number of calls
     );
-
 
     const publicInputs = PrivateCircuitPublicInputs.from({
       ...PrivateCircuitPublicInputs.empty(),
@@ -302,7 +301,11 @@ export class PublicViewOptimizer {
     const batches: FunctionCall[][] = [];
 
     // Split into batches of MAX_ENQUEUED_CALLS_PER_CALL
-    for (let i = 0; i < publicStaticCalls.length; i += MAX_ENQUEUED_CALLS_PER_CALL) {
+    for (
+      let i = 0;
+      i < publicStaticCalls.length;
+      i += MAX_ENQUEUED_CALLS_PER_CALL
+    ) {
       batches.push(publicStaticCalls.slice(i, i + MAX_ENQUEUED_CALLS_PER_CALL));
     }
 

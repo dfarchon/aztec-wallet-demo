@@ -99,7 +99,7 @@ type SimulateTxDisplayData = {
   decoded: ReadableTxInformation;
   stats?: SimulationStats;
   embeddedPaymentMethodFeePayer?: string;
-} & Record<string, unknown>;
+};
 
 /**
  * SimulateTx operation implementation.

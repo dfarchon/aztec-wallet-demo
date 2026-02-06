@@ -18,6 +18,8 @@ import type { EventMetadataDefinition } from "@aztec/stdlib/abi";
 import type {
   ContractMetadata,
   ContractClassMetadata,
+  WalletCapabilities,
+  AppCapabilities,
 } from "@aztec/aztec.js/wallet";
 import { type AztecNode } from "@aztec/aztec.js/node";
 import { type Logger } from "@aztec/aztec.js/log";
@@ -378,8 +380,8 @@ export class ExternalWallet extends BaseNativeWallet {
   }
 
   override async requestCapabilities(
-    manifest: import("@aztec/aztec.js/wallet").AppCapabilities,
-  ): Promise<import("@aztec/aztec.js/wallet").WalletCapabilities> {
+    manifest: AppCapabilities,
+  ): Promise<WalletCapabilities> {
     const op = this.createRequestCapabilitiesOperation();
     return await op.executeStandalone(manifest);
   }
