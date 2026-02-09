@@ -373,7 +373,7 @@ export class SendTxOperation<
     const receipt = await waitForTx(this.aztecNode, txHash, waitOpts);
     const miningTime = Date.now() - miningStartTime;
 
-    const timingSummary = `Sim: ${formatDuration(executionData.simulationTime)} | Prove: ${formatDuration(provingTime)} | Send: ${formatDuration(sendingTime)} | Mine: ${formatDuration(miningTime)}`;
+    const timingSummary = `Witgen: ${formatDuration(witgenTime)} | Prove: ${formatDuration(provingTime)} | Send: ${formatDuration(sendingTime)} | Mine: ${formatDuration(miningTime)}`;
     await this.emitProgress("SENT", timingSummary, true);
 
     // Store all phase timings including mining and proving stats
