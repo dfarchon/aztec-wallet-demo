@@ -4,7 +4,7 @@
  * Update demo-wallet to the latest Aztec nightly version.
  *
  * Usage:
- *   node scripts/update-to-nightly.js [--version VERSION] [--rollup-version VERSION]
+ *   node scripts/update-to-nightly.js [--version VERSION] [--rollup-version VERSION] [--network ID]
  */
 
 import { readFileSync, writeFileSync } from "fs";
@@ -39,7 +39,9 @@ function exec(command, options = {}) {
 async function fetchLatestNightly() {
   log(COLORS.yellow, "Fetching latest nightly from npm...");
   try {
-    const output = exec("npm view @aztec/aztec.js versions --json", { silent: true });
+    const output = exec("npm view @aztec/aztec.js versions --json", {
+      silent: true,
+    });
     const versions = JSON.parse(output);
     const nightlies = versions.filter((v) => v.match(/^4\.0\.0-nightly\.\d+$/));
     const latest = nightlies[nightlies.length - 1];
@@ -54,13 +56,38 @@ async function fetchLatestNightly() {
   }
 }
 
-async function fetchRollupVersion() {
-  log(COLORS.yellow, "Fetching rollup version from nextnet...");
+function getNodeUrlFromConfig(networkId) {
+  const networksFile = resolve(ROOT, "app/src/config/networks.ts");
+  const content = readFileSync(networksFile, "utf-8");
+
+  const lines = content.split("\n");
+  let inBlock = false;
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].includes(`id: "${networkId}"`)) {
+      inBlock = true;
+    }
+    if (inBlock) {
+      const match = lines[i].match(/nodeUrl:\s*"([^"]+)"/);
+      if (match) {
+        return match[1];
+      }
+    }
+  }
+  throw new Error(`No nodeUrl found for network "${networkId}" in networks.ts`);
+}
+
+async function fetchRollupVersion(nodeUrl) {
+  log(COLORS.yellow, `Fetching rollup version from ${nodeUrl}...`);
   try {
-    const res = await fetch("https://nextnet.aztec-labs.com/", {
+    const res = await fetch(nodeUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "node_getNodeInfo", params: [] }),
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "node_getNodeInfo",
+        params: [],
+      }),
     });
     const json = await res.json();
     const version = json.result?.rollupVersion;
@@ -70,8 +97,7 @@ async function fetchRollupVersion() {
     log(COLORS.green, `Fetched rollup version: ${version}`);
     return String(version);
   } catch (error) {
-    log(COLORS.red, `Failed to fetch rollup version from nextnet: ${error.message}`);
-    return null;
+    throw new Error(`Failed to fetch rollup version from ${nodeUrl}: ${error.message}`);
   }
 }
 
@@ -79,7 +105,7 @@ function updatePackageJson(path, version) {
   let content = readFileSync(path, "utf-8");
   content = content.replace(
     /@aztec\/([^"]+)": "v4\.0\.0-nightly\.\d+"/g,
-    `@aztec/$1": "v${version}"`
+    `@aztec/$1": "v${version}"`,
   );
   writeFileSync(path, content, "utf-8");
 }
@@ -103,26 +129,35 @@ function installDependencies() {
   log(COLORS.green, "✓ Dependencies installed\n");
 }
 
-function updateRollupVersion(rollupVersion) {
-  log(COLORS.yellow, `[4/4] Updating nextnet rollup version to ${rollupVersion}...`);
+function updateRollupVersion(networkId, rollupVersion) {
+  log(
+    COLORS.yellow,
+    `[4/4] Updating ${networkId} rollup version to ${rollupVersion}...`,
+  );
   const networksFile = resolve(ROOT, "app/src/config/networks.ts");
   let content = readFileSync(networksFile, "utf-8");
 
-  // Find the nextnet config and update its version
+  // Find the network config and update its version
   const lines = content.split("\n");
-  let inNextnetBlock = false;
+  let inBlock = false;
   for (let i = 0; i < lines.length; i++) {
-    if (lines[i].includes('id: "nextnet"')) {
-      inNextnetBlock = true;
+    if (lines[i].includes(`id: "${networkId}"`)) {
+      inBlock = true;
     }
-    if (inNextnetBlock && lines[i].match(/version:\s*\d+/)) {
-      lines[i] = lines[i].replace(/version:\s*\d+/, `version: ${rollupVersion}`);
+    if (inBlock && lines[i].match(/version:\s*\d+/)) {
+      lines[i] = lines[i].replace(
+        /version:\s*\d+/,
+        `version: ${rollupVersion}`,
+      );
       break;
     }
   }
 
   writeFileSync(networksFile, lines.join("\n"), "utf-8");
-  log(COLORS.green, "✓ Rollup version updated in networks.ts\n");
+  log(
+    COLORS.green,
+    `✓ Rollup version updated for ${networkId} in networks.ts\n`,
+  );
 }
 
 async function main() {
@@ -132,6 +167,7 @@ async function main() {
   const args = process.argv.slice(2);
   let version = null;
   let rollupVersion = null;
+  let network = "nextnet";
 
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--version" && args[i + 1]) {
@@ -140,11 +176,21 @@ async function main() {
     } else if (args[i] === "--rollup-version" && args[i + 1]) {
       rollupVersion = args[i + 1];
       i++;
+    } else if (args[i] === "--network" && args[i + 1]) {
+      network = args[i + 1];
+      i++;
     } else if (args[i] === "--help") {
       console.log("Usage: node scripts/update-to-nightly.js [OPTIONS]");
       console.log("\nOptions:");
-      console.log("  --version VERSION              Specify nightly version (e.g., 4.0.0-nightly.20260206)");
-      console.log("  --rollup-version VERSION       Specify rollup version for nextnet");
+      console.log(
+        "  --version VERSION              Specify nightly version (e.g., 4.0.0-nightly.20260206)",
+      );
+      console.log(
+        "  --rollup-version VERSION       Specify rollup version manually",
+      );
+      console.log(
+        "  --network ID                   Network ID to update in networks.ts (default: nextnet)",
+      );
       console.log("  --help                         Show this help message");
       process.exit(0);
     }
@@ -160,24 +206,20 @@ async function main() {
 
   // Fetch rollup version if not specified
   if (!rollupVersion) {
-    rollupVersion = await fetchRollupVersion();
+    const nodeUrl = getNodeUrlFromConfig(network);
+    rollupVersion = await fetchRollupVersion(nodeUrl);
   }
 
   // Run update steps
   updateAppPackageJson(version);
   updateExtensionPackageJson(version);
   installDependencies();
-
-  if (rollupVersion) {
-    updateRollupVersion(rollupVersion);
-  } else {
-    log(COLORS.yellow, "[4/4] Could not fetch rollup version (use --rollup-version to set manually)\n");
-  }
+  updateRollupVersion(network, rollupVersion);
 
   log(COLORS.green, "=== Update Complete ===");
   log(COLORS.green, `Version: v${version}`);
   if (rollupVersion) {
-    log(COLORS.green, `Nextnet rollup version: ${rollupVersion}`);
+    log(COLORS.green, `Rollup version: ${rollupVersion} (${network})`);
   }
 }
 
