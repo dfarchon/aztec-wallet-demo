@@ -22,10 +22,11 @@ The wallet uses **Native Messaging** for secure communication between the browse
 ```bash
 node scripts/update-to-nightly.js                                             # auto-detect latest
 node scripts/update-to-nightly.js --version 4.0.0-nightly.20260206            # specific version
-node scripts/update-to-nightly.js --rollup-version 3863723750                  # set nextnet rollup version
+node scripts/update-to-nightly.js --network devnet                             # update for devnet instead of nextnet
+node scripts/update-to-nightly.js --rollup-version 3863723750                  # set rollup version manually
 ```
 
-Updates `@aztec/*` deps in `app/` and `extension/`, runs `yarn install`, and auto-fetches the nextnet rollup version to update `networks.ts`.
+Updates `@aztec/*` deps in `app/` and `extension/`, runs `yarn install`, and fetches the rollup version from the network's node URL (configured in `networks.ts`) to update the version. Use `--network` to target a different network (default: `nextnet`).
 
 ## Development Setup
 
