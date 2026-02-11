@@ -59,6 +59,14 @@ export function App() {
     "simulateUtility",
     "sendTx",
     "profileTx",
+    "registerSender",
+    "getAccounts",
+    "getAddressBook",
+    "createAuthWit",
+    "getPrivateEvents",
+    "getContractMetadata",
+    "getContractClassMetadata",
+    "requestCapabilities",
   ]);
 
   const [authQueue, setAuthQueue] = useState<AuthorizationRequest[]>([]);

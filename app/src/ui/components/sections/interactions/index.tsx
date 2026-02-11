@@ -24,6 +24,11 @@ import type {
 } from "../../../../wallet/types/wallet-interaction";
 import { ExecutionTraceDialog } from "../../dialogs/ExecutionTraceDialog";
 import type { DecodedExecutionTrace } from "../../../../wallet/decoding/tx-callstack-decoder";
+import type {
+  SimulationStats,
+  ProvingStats,
+  StoredPhaseTimings,
+} from "../../shared/PhaseTimeline";
 import { WalletContext } from "../../../renderer";
 
 interface InteractionsListProps {
@@ -63,6 +68,13 @@ const getStatusIcon = (status: string, complete: boolean) => {
   return <CircularProgress size={14} thickness={5} />;
 };
 
+// Check if a transaction has completed proving (status moved past PROVING)
+const isProvenTx = (type: WalletInteractionType, status: string): boolean => {
+  if (type !== "sendTx" && type !== "createAccount") return false;
+  const postProvingStatuses = ["SENDING", "SENT", "MINED", "DEPLOYED"];
+  return postProvingStatuses.some((s) => status.includes(s));
+};
+
 const getInteractionTypeLabel = (type: WalletInteractionType) => {
   const labels: Record<WalletInteractionType, string> = {
     registerContract: "Register Contract",
@@ -72,6 +84,13 @@ const getInteractionTypeLabel = (type: WalletInteractionType) => {
     sendTx: "Send Transaction",
     profileTx: "Profile Transaction",
     registerSender: "Register Sender",
+    getAccounts: "Get Accounts",
+    getAddressBook: "Get Address Book",
+    createAuthWit: "Create Auth Witness",
+    getPrivateEvents: "Get Private Events",
+    getContractMetadata: "Get Contract Metadata",
+    getContractClassMetadata: "Get Contract Class Metadata",
+    requestCapabilities: "Request Capabilities",
   };
   return labels[type] || type;
 };
@@ -84,7 +103,14 @@ const getInteractionTypeColor = (type: WalletInteractionType) => {
     simulateUtility: "#ff9800", // orange (same as simulateTx)
     sendTx: "#7c4dff", // purple/violet (proving action)
     profileTx: "#00bcd4", // cyan
-    registerSender: "#444444",
+    registerSender: "#444444", // dark gray
+    getAccounts: "#4caf50", // green (data access)
+    getAddressBook: "#4caf50", // green (data access)
+    createAuthWit: "#f44336", // red (security critical)
+    getPrivateEvents: "#ff9800", // orange (privacy sensitive)
+    getContractMetadata: "#03a9f4", // light blue (metadata query)
+    getContractClassMetadata: "#03a9f4", // light blue (metadata query)
+    requestCapabilities: "#2196f3", // blue (authorization/permissions)
   };
   return colors[type];
 };
@@ -96,6 +122,14 @@ const allInteractionTypes: WalletInteractionType[] = [
   "simulateUtility",
   "sendTx",
   "profileTx",
+  "registerSender",
+  "getAccounts",
+  "getAddressBook",
+  "createAuthWit",
+  "getPrivateEvents",
+  "getContractMetadata",
+  "getContractClassMetadata",
+  "requestCapabilities",
 ];
 
 export function InteractionsList({
@@ -106,7 +140,9 @@ export function InteractionsList({
   const { walletAPI } = useContext(WalletContext);
   const [selectedTrace, setSelectedTrace] =
     useState<DecodedExecutionTrace | null>(null);
-  const [selectedStats, setSelectedStats] = useState<any | null>(null);
+  const [selectedStats, setSelectedStats] = useState<SimulationStats | null>(null);
+  const [selectedProvingStats, setSelectedProvingStats] = useState<ProvingStats | null>(null);
+  const [selectedPhaseTimings, setSelectedPhaseTimings] = useState<StoredPhaseTimings | null>(null);
   const [selectedFrom, setSelectedFrom] = useState<string | null>(null);
   const [selectedFeePayer, setSelectedFeePayer] = useState<string | null>(null);
   const [traceDialogOpen, setTraceDialogOpen] = useState(false);
@@ -125,6 +161,8 @@ export function InteractionsList({
         if (result?.trace) {
           setSelectedTrace(result.trace);
           setSelectedStats(result.stats);
+          setSelectedProvingStats(result.provingStats || null);
+          setSelectedPhaseTimings(result.phaseTimings || null);
           setSelectedFrom(result.from || null);
           setSelectedFeePayer(result.embeddedPaymentMethodFeePayer || null);
           setTraceDialogOpen(true);
@@ -246,6 +284,16 @@ export function InteractionsList({
                         )}
                         sx={{ fontSize: "0.7rem", height: 20 }}
                       />
+                      {isProvenTx(interaction.type, interaction.status) && (
+                        <Chip
+                          icon={<CheckCircle fontSize="small" />}
+                          label="Proven"
+                          size="small"
+                          color="success"
+                          variant="outlined"
+                          sx={{ fontSize: "0.7rem", height: 20 }}
+                        />
+                      )}
                     </Box>
                     <Typography
                       variant="body2"
@@ -327,6 +375,8 @@ export function InteractionsList({
         onClose={() => setTraceDialogOpen(false)}
         trace={selectedTrace}
         stats={selectedStats}
+        provingStats={selectedProvingStats || undefined}
+        phaseTimings={selectedPhaseTimings || undefined}
         from={selectedFrom}
         embeddedPaymentMethodFeePayer={selectedFeePayer}
       />

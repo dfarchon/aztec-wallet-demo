@@ -16,8 +16,10 @@ export interface FunctionCallDisplayProps {
   args: Array<{ name: string; value: string }>;
   returnValues: Array<{ name: string; value: string }>;
   callerName?: string;
-  typeLabel: "Private" | "Utility";
-  typeChipColor?: "primary";
+  typeLabel: "Private" | "Utility" | "Public";
+  typeChipColor?: "primary" | "success" | "warning" | "info";
+  /** Color for accent elements (borders, icons, labels). Defaults to primary.main */
+  accentColor?: string;
   depth?: number;
   isStaticCall?: boolean;
   needsAuth?: boolean;
@@ -34,6 +36,7 @@ export function FunctionCallDisplay({
   callerName,
   typeLabel,
   typeChipColor = "primary",
+  accentColor = "primary.main",
   depth = 0,
   isStaticCall = false,
   needsAuth = false,
@@ -49,7 +52,7 @@ export function FunctionCallDisplay({
         ml: depth * 3,
         mb: 1,
         borderLeft: depth > 0 ? "2px solid" : "none",
-        borderColor: "primary.main",
+        borderColor: accentColor,
         pl: depth > 0 ? 2 : 0,
       }}
     >
@@ -71,7 +74,7 @@ export function FunctionCallDisplay({
               width: "100%",
             }}
           >
-            <CallMadeIcon fontSize="small" color="primary" />
+            <CallMadeIcon fontSize="small" sx={{ color: accentColor }} />
             <Typography
               variant="body2"
               sx={{ fontFamily: "monospace", fontWeight: "medium" }}
@@ -115,9 +118,8 @@ export function FunctionCallDisplay({
               <Box sx={{ mb: 2 }}>
                 <Typography
                   variant="subtitle2"
-                  color="primary"
+                  sx={{ fontWeight: "bold", color: accentColor }}
                   gutterBottom
-                  sx={{ fontWeight: "bold" }}
                 >
                   Arguments:
                 </Typography>
@@ -143,7 +145,7 @@ export function FunctionCallDisplay({
                           fontFamily: "monospace",
                           fontSize: "0.875rem",
                           fontWeight: "medium",
-                          color: "primary.main",
+                          color: accentColor,
                           whiteSpace: "nowrap",
                         }}
                       >
@@ -170,9 +172,8 @@ export function FunctionCallDisplay({
               <Box sx={{ mb: 2 }}>
                 <Typography
                   variant="subtitle2"
-                  color="primary"
+                  sx={{ fontWeight: "bold", color: accentColor }}
                   gutterBottom
-                  sx={{ fontWeight: "bold" }}
                 >
                   Return Values:
                 </Typography>
@@ -198,7 +199,7 @@ export function FunctionCallDisplay({
                           fontFamily: "monospace",
                           fontSize: "0.875rem",
                           fontWeight: "medium",
-                          color: "primary.main",
+                          color: accentColor,
                           whiteSpace: "nowrap",
                         }}
                       >

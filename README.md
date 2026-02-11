@@ -17,6 +17,16 @@ The wallet uses **Native Messaging** for secure communication between the browse
 - **Native Host**: A small binary (`native-host`) that bridges extension ↔ Electron via stdio/socket
 - **Electron App**: Runs the wallet-worker process that handles account management and signing
 
+## Updating to Latest Nightly
+
+```bash
+node scripts/update-to-nightly.js                                             # auto-detect latest
+node scripts/update-to-nightly.js --version 4.0.0-nightly.20260206            # specific version
+node scripts/update-to-nightly.js --rollup-version 3863723750                  # set nextnet rollup version
+```
+
+Updates `@aztec/*` deps in `app/` and `extension/`, runs `yarn install`, and auto-fetches the nextnet rollup version to update `networks.ts`.
+
 ## Development Setup
 
 ### Prerequisites

@@ -16,7 +16,7 @@ import type { DecodingCache } from "./decoding-cache";
 import { Fr } from "@aztec/foundation/curves/bn254";
 import { PRIVATE_CONTEXT_INPUTS_LENGTH } from "@aztec/constants";
 
-export type ExecutionEvent = PrivateCallEvent | PublicEnqueueEvent;
+export type ExecutionEvent = PrivateCallEvent | PublicCallEvent;
 
 export interface PrivateCallEvent {
   type: "private-call";
@@ -31,8 +31,13 @@ export interface PrivateCallEvent {
   nestedEvents: ExecutionEvent[];
 }
 
-export interface PublicEnqueueEvent {
-  type: "public-enqueue";
+/**
+ * Represents a public call - either enqueued during private execution or
+ * executed directly (e.g., optimized public static calls).
+ * Return values are populated when the call has been executed.
+ */
+export interface PublicCallEvent {
+  type: "public-call";
   depth: number;
   counter: number;
   contract: { name: string; address: string };
@@ -40,23 +45,29 @@ export interface PublicEnqueueEvent {
   caller: { name: string; address: string };
   isStaticCall: boolean;
   args: Array<{ name: string; value: string }>;
+  /** Return values - populated when the call has been executed */
+  returnValues?: Array<{ name: string; value: string }>;
 }
 
 export interface DecodedExecutionTrace {
   privateExecution: PrivateCallEvent;
-  publicExecutionQueue: PublicEnqueueEvent[];
+  /** Public calls in execution order. Return values populated if executed. */
+  publicCalls: PublicCallEvent[];
 }
 
 export class TxCallStackDecoder {
   private calldataMap: Map<string, any[]> = new Map();
 
-  constructor(private cache: DecodingCache) {}
+  constructor(
+    private cache: DecodingCache,
+    private log?: any,
+  ) {}
 
   private async formatAndResolveValue(value: AbiDecoded): Promise<string> {
     // Handle arrays recursively
     if (Array.isArray(value)) {
       const formattedElements = await Promise.all(
-        value.map(async (v) => await this.formatAndResolveValue(v))
+        value.map(async (v) => await this.formatAndResolveValue(v)),
       );
       return `[${formattedElements.join(", ")}]`;
     }
@@ -91,7 +102,7 @@ export class TxCallStackDecoder {
    */
   private extractArgsFromWitness(
     partialWitness: Map<number, string>,
-    functionAbi: FunctionAbi
+    functionAbi: FunctionAbi,
   ): Fr[] {
     // Calculate the total size of parameters
     let parametersSize = 0;
@@ -141,14 +152,14 @@ export class TxCallStackDecoder {
   private async decodePrivateCall(
     call: PrivateCallExecutionResult,
     depth: number,
-    parentPublicEnqueues: Array<{ counter: number; request: any }>
+    parentPublicEnqueues: Array<{ counter: number; request: any }>,
   ): Promise<PrivateCallEvent> {
     const callContext = call.publicInputs.callContext;
     const startCounter = call.publicInputs.startSideEffectCounter.toNumber();
     const endCounter = call.publicInputs.endSideEffectCounter.toNumber();
 
     const contractName = await this.cache.getAddressAlias(
-      callContext.contractAddress
+      callContext.contractAddress,
     );
     const callerName = await this.cache.getAddressAlias(callContext.msgSender);
 
@@ -157,49 +168,48 @@ export class TxCallStackDecoder {
     let returnValues: Array<{ name: string; value: string }> = [];
 
     try {
-      const metadata = await this.cache.getContractMetadata(
-        callContext.contractAddress
+      const instance = await this.cache.getContractInstance(
+        callContext.contractAddress,
       );
-      if (metadata.contractInstance) {
-        const artifact = await this.cache.getContractArtifact(
-          metadata.contractInstance.currentContractClassId
-        );
-        const functionAbi = await getFunctionArtifact(
-          artifact,
-          callContext.functionSelector
-        );
-        functionName = functionAbi.name;
+      const artifact = await this.cache.getContractArtifact(
+        instance.currentContractClassId,
+      );
+      const functionAbi = await getFunctionArtifact(
+        artifact,
+        callContext.functionSelector,
+      );
+      functionName = functionAbi.name;
 
-        // Extract arguments from partialWitness
-        if (functionAbi.parameters.length > 0 && call.partialWitness) {
-          try {
-            const argsValues = this.extractArgsFromWitness(
-              call.partialWitness,
-              functionAbi
-            );
-
-            // Reuse the generic argument decoding helper
-            args = await this.decodeAndFormatArguments(functionAbi, argsValues);
-          } catch (error) {
-            // Silently fail - args will remain empty
-          }
-        }
-
-        // Decode return values - reuse the generic return value decoding helper
-        if (functionAbi.returnTypes.length > 0) {
-          returnValues = await this.decodeAndFormatReturnValues(
+      // Extract arguments from partialWitness
+      if (functionAbi.parameters.length > 0 && call.partialWitness) {
+        try {
+          const argsValues = this.extractArgsFromWitness(
+            call.partialWitness,
             functionAbi,
-            call.returnValues
           );
+
+          // Reuse the generic argument decoding helper
+          args = await this.decodeAndFormatArguments(functionAbi, argsValues);
+        } catch (error) {
+          // Silently fail - args will remain empty
         }
       }
+
+      // Decode return values - reuse the generic return value decoding helper
+      if (functionAbi.returnTypes.length > 0) {
+        returnValues = await this.decodeAndFormatReturnValues(
+          functionAbi,
+          call.returnValues,
+        );
+      }
     } catch (error) {
-      // If we can't decode, use raw values
+      // If we can't decode, use raw values with consistent naming
+      const rvCount = call.returnValues.length;
       returnValues = await Promise.all(
         call.returnValues.map(async (rv, i) => ({
-          name: `return_${i}`,
+          name: rvCount === 1 ? "result" : `result_${i}`,
           value: rv.toString(),
-        }))
+        })),
       );
     }
 
@@ -235,14 +245,14 @@ export class TxCallStackDecoder {
           (e) =>
             e.counter >= startCounter &&
             e.counter < nestedStartCounter &&
-            !addedEnqueues.has(e.counter)
+            !addedEnqueues.has(e.counter),
         );
 
         for (const enq of enqueuedBefore) {
-          const event = await this.decodePublicEnqueue(
+          const event = await this.decodePublicCall(
             enq.request,
             depth + 1,
-            enq.counter
+            enq.counter,
           );
           nestedEvents.push(event);
           addedEnqueues.add(enq.counter);
@@ -252,7 +262,7 @@ export class TxCallStackDecoder {
         const nestedEvent = await this.decodePrivateCall(
           nestedCall,
           depth + 1,
-          allPublicEnqueues
+          allPublicEnqueues,
         );
         nestedEvents.push(nestedEvent);
       }
@@ -263,14 +273,14 @@ export class TxCallStackDecoder {
       (e) =>
         e.counter >= startCounter &&
         e.counter < endCounter &&
-        !addedEnqueues.has(e.counter)
+        !addedEnqueues.has(e.counter),
     );
 
     for (const enq of enqueuedAfter) {
-      const event = await this.decodePublicEnqueue(
+      const event = await this.decodePublicCall(
         enq.request,
         depth + 1,
-        enq.counter
+        enq.counter,
       );
       nestedEvents.push(event);
       addedEnqueues.add(enq.counter);
@@ -296,13 +306,13 @@ export class TxCallStackDecoder {
     };
   }
 
-  private async decodePublicEnqueue(
+  private async decodePublicCall(
     request: any,
     depth: number,
-    counter: number
-  ): Promise<PublicEnqueueEvent> {
+    counter: number,
+  ): Promise<PublicCallEvent> {
     const contractName = await this.cache.getAddressAlias(
-      request.contractAddress
+      request.contractAddress,
     );
     const callerName = await this.cache.getAddressAlias(request.msgSender);
 
@@ -313,62 +323,49 @@ export class TxCallStackDecoder {
     const calldata = this.calldataMap.get(calldataHashStr);
 
     if (calldata && calldata.length > 0) {
+      // First element of calldata is the function selector
+      const functionSelector = FunctionSelector.fromField(calldata[0]);
+
+      // Try to resolve function name and decode arguments from contract ABI
       try {
-        // First element of calldata is the function selector
-        const functionSelector = FunctionSelector.fromField(calldata[0]);
+        const instance = await this.cache.getContractInstance(
+          request.contractAddress,
+        );
+        const artifact = await this.cache.getContractArtifact(
+          instance.currentContractClassId,
+        );
+        const allAbis = await getAllFunctionAbis(artifact);
+        const abisWithSelector = await Promise.all(
+          allAbis.map(async (abi) => ({
+            ...abi,
+            selector: await FunctionSelector.fromNameAndParameters(
+              abi.name,
+              abi.parameters,
+            ),
+          })),
+        );
+        const functionAbi = abisWithSelector.find((abi) =>
+          abi.selector.equals(functionSelector),
+        );
 
-        // Try to resolve function name and decode arguments from contract ABI
-        try {
-          const metadata = await this.cache.getContractMetadata(
-            request.contractAddress
-          );
-          if (metadata.contractInstance) {
-            const artifact = await this.cache.getContractArtifact(
-              metadata.contractInstance.currentContractClassId
-            );
-            const allAbis = await getAllFunctionAbis(artifact);
-            const abisWithSelector = await Promise.all(
-              allAbis.map(async (abi) => ({
-                ...abi,
-                selector: await FunctionSelector.fromNameAndParameters(
-                  abi.name,
-                  abi.parameters
-                ),
-              }))
-            );
-            const functionAbi = abisWithSelector.find((abi) =>
-              abi.selector.equals(functionSelector)
-            );
+        if (functionAbi) {
+          functionName = functionAbi.name;
 
-            if (functionAbi) {
-              functionName = functionAbi.name;
-
-              // Decode arguments - calldata is [selector, ...args]
-              if (functionAbi.parameters.length > 0 && calldata.length > 1) {
-                try {
-                  const argsData = calldata.slice(1); // Skip the selector
-                  // Reuse the generic argument decoding helper
-                  args = await this.decodeAndFormatArguments(
-                    functionAbi,
-                    argsData
-                  );
-                } catch (error) {
-                  // Silently fail - args will remain empty
-                }
-              }
-            }
+          // Decode arguments - calldata is [selector, ...args]
+          if (functionAbi.parameters.length > 0 && calldata.length > 1) {
+            const argsData = calldata.slice(1); // Skip the selector
+            args = await this.decodeAndFormatArguments(functionAbi, argsData);
           }
-        } catch {
-          // If we can't resolve from ABI, use the selector hex
-          functionName = `0x${functionSelector.toString().slice(2, 10)}`;
         }
       } catch (error) {
-        // Silently fail
+        // If we can't resolve from ABI, use the selector hex
+        this.log?.error("Failed to resolve function from ABI:", error);
+        functionName = `0x${functionSelector.toString().slice(2, 10)}`;
       }
     }
 
     return {
-      type: "public-enqueue",
+      type: "public-call",
       depth,
       counter,
       contract: {
@@ -386,7 +383,7 @@ export class TxCallStackDecoder {
   }
 
   async decodeSimulationResult(
-    simulationResult: TxSimulationResult
+    simulationResult: TxSimulationResult,
   ): Promise<DecodedExecutionTrace> {
     // Build calldata map from publicFunctionCalldata
     this.calldataMap.clear();
@@ -395,7 +392,7 @@ export class TxCallStackDecoder {
         .publicFunctionCalldata) {
         this.calldataMap.set(
           hashedCalldata.hash.toString(),
-          hashedCalldata.values
+          hashedCalldata.values,
         );
       }
     }
@@ -405,26 +402,87 @@ export class TxCallStackDecoder {
     // Decode the private execution tree
     const privateExecution = await this.decodePrivateCall(entrypoint, 0, []);
 
-    // Collect all public enqueues in execution order (by counter)
-    const allPublicEnqueues: PublicEnqueueEvent[] = [];
+    // Collect all public calls in execution order (by counter)
+    let allPublicCalls: PublicCallEvent[] = [];
 
-    const collectPublicEnqueues = (event: ExecutionEvent) => {
-      if (event.type === "public-enqueue") {
-        allPublicEnqueues.push(event);
+    const collectPublicCalls = (event: ExecutionEvent) => {
+      if (event.type === "public-call") {
+        allPublicCalls.push(event);
       } else if (event.type === "private-call") {
-        event.nestedEvents.forEach(collectPublicEnqueues);
+        event.nestedEvents.forEach(collectPublicCalls);
       }
     };
 
-    collectPublicEnqueues(privateExecution);
+    collectPublicCalls(privateExecution);
 
     // Sort by counter to show execution order
-    allPublicEnqueues.sort((a, b) => a.counter - b.counter);
+    allPublicCalls.sort((a, b) => a.counter - b.counter);
+
+    // Populate return values from publicOutput.publicReturnValues
+    const publicReturnValues =
+      simulationResult.publicOutput?.publicReturnValues ?? [];
+
+    for (
+      let i = 0;
+      i < allPublicCalls.length && i < publicReturnValues.length;
+      i++
+    ) {
+      const returnValue = publicReturnValues[i];
+      const publicCall = allPublicCalls[i];
+
+      if (returnValue?.values && returnValue.values.length > 0) {
+        // Try to decode return values using the function ABI
+        publicCall.returnValues = await this.decodePublicCallReturnValues(
+          AztecAddress.fromString(publicCall.contract.address),
+          publicCall.function,
+          returnValue.values,
+        );
+      }
+    }
 
     return {
       privateExecution,
-      publicExecutionQueue: allPublicEnqueues,
+      publicCalls: allPublicCalls,
     };
+  }
+
+  /**
+   * Decode return values for a public call using the function ABI.
+   * Note: returnValues may be Fr instances or serialized values (after IPC).
+   */
+  private async decodePublicCallReturnValues(
+    contractAddress: AztecAddress,
+    functionName: string,
+    returnValues: unknown[],
+  ): Promise<Array<{ name: string; value: string }>> {
+    // Ensure values are proper Fr instances (they may have been serialized)
+    // Use Fr.fromPlainObject which handles various serialized formats
+    const frValues = returnValues.map((v) => Fr.fromPlainObject(v));
+
+    try {
+      const instance = await this.cache.getContractInstance(contractAddress);
+      const artifact = await this.cache.getContractArtifact(
+        instance.currentContractClassId,
+      );
+
+      // Use getAllFunctionAbis to get all functions including non-dispatch public functions
+      const allAbis = getAllFunctionAbis(artifact);
+
+      // Find the function by name
+      const functionAbi = allAbis.find((f) => f.name === functionName);
+
+      if (functionAbi) {
+        return await this.decodeAndFormatReturnValues(functionAbi, frValues);
+      }
+    } catch (error) {
+      this.log?.debug("Could not decode public call return values:", error);
+    }
+
+    // Fallback: return raw values with consistent naming
+    return frValues.map((rv, i) => ({
+      name: frValues.length === 1 ? "result" : `result_${i}`,
+      value: rv.toString(),
+    }));
   }
 
   /**
@@ -437,7 +495,7 @@ export class TxCallStackDecoder {
    */
   private async decodeAndFormatArguments(
     functionAbi: FunctionAbi,
-    args: Fr[]
+    args: Fr[],
   ): Promise<Array<{ name: string; value: string }>> {
     if (!functionAbi.parameters || functionAbi.parameters.length === 0) {
       return [];
@@ -446,7 +504,7 @@ export class TxCallStackDecoder {
     // Decode the Fr[] args using the function's parameter types
     const decoded = decodeFromAbi(
       functionAbi.parameters.map((p) => p.type),
-      args
+      args,
     );
 
     // decodeFromAbi returns a single value if there's one param, or an array for multiple
@@ -457,7 +515,7 @@ export class TxCallStackDecoder {
       decodedArgs.map(async (value, i) => ({
         name: functionAbi.parameters[i]?.name || `arg_${i}`,
         value: await this.formatAndResolveValue(value),
-      }))
+      })),
     );
   }
 
@@ -471,7 +529,7 @@ export class TxCallStackDecoder {
    */
   private async decodeAndFormatReturnValues(
     functionAbi: FunctionAbi,
-    returnValues: Fr[]
+    returnValues: Fr[],
   ): Promise<Array<{ name: string; value: string }>> {
     if (!functionAbi.returnTypes || functionAbi.returnTypes.length === 0) {
       return [];
@@ -483,11 +541,12 @@ export class TxCallStackDecoder {
     // decodeFromAbi returns a single value if there's one return type, or an array for multiple
     const decodedReturns = Array.isArray(decoded) ? decoded : [decoded];
 
+    // Use "result" for single return value (like utilities), indexed names for multiple
     return await Promise.all(
       decodedReturns.map(async (value, i) => ({
-        name: `return_${i}`,
+        name: decodedReturns.length === 1 ? "result" : `result_${i}`,
         value: await this.formatAndResolveValue(value),
-      }))
+      })),
     );
   }
 
@@ -501,26 +560,23 @@ export class TxCallStackDecoder {
   async formatUtilityArguments(
     contractAddress: AztecAddress,
     functionName: string,
-    args: Fr[]
+    args: Fr[],
   ): Promise<Array<{ name: string; value: string }>> {
     if (args.length === 0) {
       return [];
     }
 
     try {
-      // Retrieve contract metadata and artifact
-      const metadata = await this.cache.getContractMetadata(contractAddress);
-      if (!metadata.contractInstance) {
-        throw new Error("No contract instance metadata found");
-      }
+      // Retrieve contract instance and artifact
+      const instance = await this.cache.getContractInstance(contractAddress);
 
       const artifact = await this.cache.getContractArtifact(
-        metadata.contractInstance.currentContractClassId
+        instance.currentContractClassId,
       );
 
       // Find the function in the artifact
       const functionAbi = artifact.functions.find(
-        (f) => f.name === functionName
+        (f) => f.name === functionName,
       );
       if (!functionAbi) {
         throw new Error(`Function ${functionName} not found in artifact`);
@@ -547,22 +603,19 @@ export class TxCallStackDecoder {
   async formatUtilityResult(
     contractAddress: AztecAddress,
     functionName: string,
-    result: Fr[]
+    result: Fr[],
   ): Promise<string> {
     try {
-      // Retrieve contract metadata and artifact
-      const metadata = await this.cache.getContractMetadata(contractAddress);
-      if (!metadata.contractInstance) {
-        throw new Error("No contract instance metadata found");
-      }
+      // Retrieve contract instance and artifact
+      const instance = await this.cache.getContractInstance(contractAddress);
 
       const artifact = await this.cache.getContractArtifact(
-        metadata.contractInstance.currentContractClassId
+        instance.currentContractClassId,
       );
 
       // Find the function in the artifact
       const functionAbi = artifact.functions.find(
-        (f) => f.name === functionName
+        (f) => f.name === functionName,
       );
       if (!functionAbi) {
         throw new Error(`Function ${functionName} not found in artifact`);
@@ -576,7 +629,7 @@ export class TxCallStackDecoder {
       // Reuse the generic return value decoding helper (same logic as transaction decoding)
       const formattedReturns = await this.decodeAndFormatReturnValues(
         functionAbi,
-        result
+        result,
       );
 
       // For utility functions, we typically have a single return value

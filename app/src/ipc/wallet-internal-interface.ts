@@ -1,5 +1,5 @@
 import { Fr } from "@aztec/aztec.js/fields";
-import { type Wallet, WalletSchema } from "@aztec/aztec.js/wallet";
+import { type Wallet, WalletSchema, type GrantedCapability } from "@aztec/aztec.js/wallet";
 import { optional, schemas } from "@aztec/stdlib/schemas";
 import { z } from "zod";
 import { type ApiSchemaFor } from "@aztec/stdlib/schemas";
@@ -38,14 +38,16 @@ const ArgValueSchema = z.object({
   value: z.string(),
 });
 
-const PublicEnqueueEventSchema: z.ZodType<any> = z.object({
-  type: z.literal("public-enqueue"),
+const PublicCallEventSchema: z.ZodType<any> = z.object({
+  type: z.literal("public-call"),
   depth: z.number(),
   counter: z.number(),
   contract: ContractInfoSchema,
   function: z.string(),
   caller: ContractInfoSchema,
   isStaticCall: z.boolean(),
+  args: z.array(ArgValueSchema),
+  returnValues: z.array(ArgValueSchema).optional(),
 });
 
 const PrivateCallEventSchema: z.ZodType<any> = z.lazy(() =>
@@ -63,7 +65,7 @@ const PrivateCallEventSchema: z.ZodType<any> = z.lazy(() =>
     args: z.array(ArgValueSchema),
     returnValues: z.array(ArgValueSchema),
     nestedEvents: z.array(
-      z.union([PrivateCallEventSchema, PublicEnqueueEventSchema])
+      z.union([PrivateCallEventSchema, PublicCallEventSchema])
     ),
   })
 );
@@ -72,7 +74,7 @@ const DecodedExecutionTraceSchema = z.union([
   // Full transaction trace
   z.object({
     privateExecution: PrivateCallEventSchema,
-    publicExecutionQueue: z.array(PublicEnqueueEventSchema),
+    publicCalls: z.array(PublicCallEventSchema),
   }),
   // Simplified utility trace
   z.object({
@@ -84,6 +86,47 @@ const DecodedExecutionTraceSchema = z.union([
     isUtility: z.literal(true),
   }),
 ]);
+
+// Schemas for simulation/proving stats
+const FunctionTimingSchema = z.object({
+  functionName: z.string(),
+  time: z.number(),
+  oracles: z.record(z.object({ times: z.array(z.number()) })).optional(),
+});
+
+const StatsTimingsSchema = z.object({
+  sync: z.number(),
+  publicSimulation: z.number().optional(),
+  validation: z.number().optional(),
+  proving: z.number().optional(), // Only present in ProvingStats - actual proof generation time
+  perFunction: z.array(FunctionTimingSchema),
+  unaccounted: z.number(),
+  total: z.number(),
+});
+
+const SimulationStatsSchema = z.object({
+  timings: StatsTimingsSchema,
+  nodeRPCCalls: z
+    .object({
+      perMethod: z.record(z.object({ times: z.array(z.number()) })),
+      roundTrips: z.object({
+        roundTripDurations: z.array(z.number()),
+        roundTripMethods: z.array(z.array(z.string())),
+      }),
+    })
+    .optional(),
+});
+
+const ProvingStatsSchema = z.object({
+  timings: StatsTimingsSchema,
+});
+
+const StoredPhaseTimingsSchema = z.object({
+  simulation: z.number().optional(),
+  proving: z.number().optional(),
+  sending: z.number().optional(),
+  mining: z.number().optional(),
+});
 
 // Internal wallet interface - extends external with internal-only methods
 export type InternalWalletInterface = Omit<Wallet, "getAccounts"> & {
@@ -99,7 +142,9 @@ export type InternalWalletInterface = Omit<Wallet, "getAccounts"> & {
   getExecutionTrace(interactionId: string): Promise<
     | {
         trace?: DecodedExecutionTrace;
-        stats?: any;
+        stats?: z.infer<typeof SimulationStatsSchema>;
+        provingStats?: z.infer<typeof ProvingStatsSchema>;
+        phaseTimings?: z.infer<typeof StoredPhaseTimingsSchema>;
         from?: string;
         embeddedPaymentMethodFeePayer?: string;
       }
@@ -113,17 +158,13 @@ export type InternalWalletInterface = Omit<Wallet, "getAccounts"> & {
   ) => void;
   // App authorization management
   listAuthorizedApps(): Promise<string[]>;
-  getAppAuthorizations(appId: string): Promise<{
-    accounts: { alias: string; item: string }[];
-    contacts: { alias: string; item: string }[];
-    simulations: Array<{
-      type: "simulateTx" | "simulateUtility";
-      payloadHash: string;
-      title?: string;
-      key: string;
-    }>;
-    otherMethods: string[];
-  }>;
+  getAppCapabilities(appId: string): Promise<GrantedCapability[]>;
+  capabilityToStorageKeys(capability: GrantedCapability): Promise<string[]>;
+  storeCapabilityGrants(
+    appId: string,
+    manifest: any,
+    granted: GrantedCapability[]
+  ): Promise<void>;
   updateAccountAuthorization(
     appId: string,
     accounts: { alias: string; item: string }[]
@@ -174,7 +215,9 @@ export const InternalWalletInterfaceSchema: ApiSchemaFor<InternalWalletInterface
         optional(
           z.object({
             trace: DecodedExecutionTraceSchema.optional(),
-            stats: z.any().optional(),
+            stats: SimulationStatsSchema.optional(),
+            provingStats: ProvingStatsSchema.optional(),
+            phaseTimings: StoredPhaseTimingsSchema.optional(),
             from: z.string().optional(),
             embeddedPaymentMethodFeePayer: z.string().optional(),
           })
@@ -192,24 +235,20 @@ export const InternalWalletInterfaceSchema: ApiSchemaFor<InternalWalletInterface
     // App authorization management
     listAuthorizedApps: z.function().args().returns(z.array(z.string())),
     // @ts-ignore
-    getAppAuthorizations: z
+    getAppCapabilities: z
       .function()
       .args(z.string())
-      .returns(
-        z.object({
-          accounts: z.array(z.object({ alias: z.string(), item: z.string() })),
-          contacts: z.array(z.object({ alias: z.string(), item: z.string() })),
-          simulations: z.array(
-            z.object({
-              type: z.enum(["simulateTx", "simulateUtility"]),
-              payloadHash: z.string(),
-              title: z.string().optional(),
-              key: z.string(),
-            })
-          ),
-          otherMethods: z.array(z.string()),
-        })
-      ),
+      .returns(z.array(z.any())),
+    // @ts-ignore
+    capabilityToStorageKeys: z
+      .function()
+      .args(z.any())
+      .returns(z.array(z.string())),
+    // @ts-ignore
+    storeCapabilityGrants: z
+      .function()
+      .args(z.string(), z.any(), z.array(z.any()))
+      .returns(z.void()),
     // @ts-ignore
     updateAccountAuthorization: z
       .function()

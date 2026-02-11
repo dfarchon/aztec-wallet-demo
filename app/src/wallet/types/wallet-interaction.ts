@@ -14,7 +14,14 @@ export type WalletInteractionType =
   | "simulateTx"
   | "simulateUtility"
   | "sendTx"
-  | "profileTx";
+  | "profileTx"
+  | "getAccounts"
+  | "getAddressBook"
+  | "createAuthWit"
+  | "getPrivateEvents"
+  | "getContractMetadata"
+  | "getContractClassMetadata"
+  | "requestCapabilities";
 
 export const WalletInteractionSchema = z
   .object({
@@ -27,6 +34,13 @@ export const WalletInteractionSchema = z
       "simulateUtility",
       "sendTx",
       "profileTx",
+      "getAccounts",
+      "getAddressBook",
+      "createAuthWit",
+      "getPrivateEvents",
+      "getContractMetadata",
+      "getContractClassMetadata",
+      "requestCapabilities",
     ]),
     status: z.string(),
     complete: z.boolean(),

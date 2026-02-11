@@ -5,7 +5,7 @@ import {
 } from "./base-operation";
 import type { AztecAddress } from "@aztec/stdlib/aztec-address";
 import {
-  type TxSimulationResult,
+  TxSimulationResult,
   type TxExecutionRequest,
   type SimulationStats,
   type ExecutionPayload,
@@ -31,10 +31,18 @@ import {
 } from "../utils/simulation-utils";
 import type { SimulateOptions } from "@aztec/aztec.js/wallet";
 import type { ContractInstanceWithAddress } from "@aztec/stdlib/contract";
-import type { ContractArtifact } from "@aztec/stdlib/abi";
+import type { ContractArtifact, FunctionCall } from "@aztec/stdlib/abi";
 import type { GasSettings } from "@aztec/stdlib/gas";
 import type { FieldsOf } from "@aztec/foundation/types";
-import type { FeeOptions } from "@aztec/wallet-sdk/base-wallet";
+import {
+  type FeeOptions,
+  extractOptimizablePublicStaticCalls,
+  simulateViaNode,
+  buildMergedSimulationResult,
+} from "@aztec/wallet-sdk/base-wallet";
+import type { ChainInfo } from "@aztec/entrypoints/interfaces";
+import type { AztecNode } from "@aztec/aztec.js/node";
+import type { Logger } from "@aztec/aztec.js/log";
 
 // Readable transaction information with decoded data
 interface ReadableTxInformation {
@@ -48,7 +56,8 @@ interface FakeAccountData {
     createTxExecutionRequest: (
       payload: ExecutionPayload,
       gasSettings: unknown,
-      options: DefaultAccountEntrypointOptions
+      chainInfo: ChainInfo,
+      options: DefaultAccountEntrypointOptions,
     ) => Promise<TxExecutionRequest>;
   };
   instance: ContractInstanceWithAddress;
@@ -68,7 +77,6 @@ type SimulateTxResult = TxSimulationResult;
 // Execution data stored between prepare and execute phases
 interface SimulateTxExecutionData {
   simulationResult: TxSimulationResult;
-  txRequest: TxExecutionRequest;
   payloadHash: string;
   decoded?: ReadableTxInformation;
 }
@@ -81,7 +89,7 @@ type SimulateTxDisplayData = {
   decoded: ReadableTxInformation;
   stats?: SimulationStats;
   embeddedPaymentMethodFeePayer?: string;
-} & Record<string, unknown>;
+};
 
 /**
  * SimulateTx operation implementation.
@@ -105,6 +113,7 @@ export class SimulateTxOperation extends ExternalOperation<
 
   constructor(
     private pxe: PXE,
+    private node: AztecNode,
     private db: WalletDB,
     private decodingCache: DecodingCache,
     interactionManager: InteractionManager,
@@ -112,17 +121,19 @@ export class SimulateTxOperation extends ExternalOperation<
     private completeFeeOptionsForEstimation: (
       from: AztecAddress,
       feePayer: AztecAddress | undefined,
-      gasSettings?: Partial<FieldsOf<GasSettings>>
+      gasSettings?: Partial<FieldsOf<GasSettings>>,
     ) => Promise<FeeOptions>,
     private completeFeeOptions: (
       from: AztecAddress,
       feePayer: AztecAddress | undefined,
-      gasSettings?: Partial<FieldsOf<GasSettings>>
+      gasSettings?: Partial<FieldsOf<GasSettings>>,
     ) => Promise<FeeOptions>,
     private getFakeAccountDataFor: (
-      address: AztecAddress
+      address: AztecAddress,
     ) => Promise<FakeAccountData>,
-    private cancellableTransactions: boolean
+    private getChainInfo: () => Promise<ChainInfo>,
+    private cancellableTransactions: boolean,
+    private log: Logger,
   ) {
     super();
     this.interactionManager = interactionManager;
@@ -130,7 +141,7 @@ export class SimulateTxOperation extends ExternalOperation<
 
   async check(
     _executionPayload: ExecutionPayload,
-    _opts: SimulateOptions
+    _opts: SimulateOptions,
   ): Promise<SimulateTxResult | undefined> {
     // No early return checks for this operation
     return undefined;
@@ -138,7 +149,7 @@ export class SimulateTxOperation extends ExternalOperation<
 
   async prepare(
     executionPayload: ExecutionPayload,
-    opts: SimulateOptions
+    opts: SimulateOptions,
   ): Promise<
     PrepareResult<
       SimulateTxResult,
@@ -152,7 +163,7 @@ export class SimulateTxOperation extends ExternalOperation<
       executionPayload,
       this.decodingCache,
       opts.from,
-      executionPayload.feePayer
+      executionPayload.feePayer,
     );
 
     // Process fee options
@@ -160,12 +171,12 @@ export class SimulateTxOperation extends ExternalOperation<
       ? await this.completeFeeOptionsForEstimation(
           opts.from,
           executionPayload.feePayer,
-          opts.fee?.gasSettings
+          opts.fee?.gasSettings,
         )
       : await this.completeFeeOptions(
           opts.from,
           executionPayload.feePayer,
-          opts.fee?.gasSettings
+          opts.fee?.gasSettings,
         );
 
     const feeExecutionPayload =
@@ -176,43 +187,60 @@ export class SimulateTxOperation extends ExternalOperation<
       feePaymentMethodOptions: feeOptions.accountFeePaymentMethodOptions,
     };
 
-    const finalExecutionPayload = feeExecutionPayload
-      ? mergeExecutionPayloads([feeExecutionPayload, executionPayload])
-      : executionPayload;
+    // STEP 1: Separate calls into optimized (public static) and normal paths
+    const { optimizableCalls, remainingCalls } =
+      extractOptimizablePublicStaticCalls(executionPayload);
 
-    // Create transaction execution request
-    const {
-      account: fromAccount,
-      instance,
-      artifact,
-    } = await this.getFakeAccountDataFor(opts.from);
+    const chainInfo = await this.getChainInfo();
+    const blockHeader = await this.pxe.getSyncedBlockHeader();
 
-    const txRequest = await fromAccount.createTxExecutionRequest(
-      finalExecutionPayload,
-      feeOptions.gasSettings,
-      executionOptions
+    // STEP 2: Run both paths in parallel
+    const [optimizedResults, normalResult] = await Promise.all([
+      optimizableCalls.length > 0
+        ? simulateViaNode(
+            this.node,
+            optimizableCalls,
+            opts.from,
+            chainInfo,
+            feeOptions.gasSettings,
+            blockHeader,
+            opts.skipFeeEnforcement ?? true,
+          )
+        : Promise.resolve([]),
+
+      remainingCalls.length > 0
+        ? this.simulateViaEntrypoint(
+            executionPayload,
+            remainingCalls,
+            feeExecutionPayload,
+            feeOptions.gasSettings,
+            chainInfo,
+            executionOptions,
+            opts.from,
+          )
+        : Promise.resolve(null),
+    ]);
+
+    // STEP 3: Build the final merged TxSimulationResult
+    const simulationResult = buildMergedSimulationResult(
+      optimizedResults,
+      normalResult?.result ?? null,
     );
 
-    const contractOverrides = {
-      [opts.from.toString()]: { instance, artifact },
-    };
-
-    // Simulate the transaction
-    const simulationResult = await this.pxe.simulateTx(
-      txRequest,
-      true /* simulatePublic */,
-      true,
-      true,
-      { contracts: contractOverrides }
-    );
-
-    await this.db.storeTxSimulation(payloadHash, simulationResult, txRequest, {
+    await this.db.storeTxSimulation(payloadHash, simulationResult, {
       from: opts.from.toString(),
       embeddedPaymentMethodFeePayer: executionPayload.feePayer?.toString(),
     });
 
-    const decodingService = new TxDecodingService(this.decodingCache);
+    // STEP 4: Decode the transaction (including optimized public calls if any)
+    const decodingService = new TxDecodingService(this.decodingCache, this.log);
     const decoded = await decodingService.decodeTransaction(simulationResult);
+
+    // Create one storage key per function call for 1:1 mapping with capabilities
+    const storageKeys =
+      executionPayload.calls?.map(
+        (call) => `simulateTx:${call.to.toString()}:${call.name}`,
+      ) || [];
 
     return {
       displayData: {
@@ -225,20 +253,55 @@ export class SimulateTxOperation extends ExternalOperation<
       },
       executionData: {
         simulationResult,
-        txRequest,
         payloadHash,
         decoded,
       },
       persistence: {
-        storageKey: `simulateTx:${payloadHash}`,
-        persistData: { title },
+        storageKey: storageKeys,
+        persistData: null,
       },
     };
   }
 
+  /**
+   * Run the normal (non-optimized) simulation path for private/non-static calls.
+   */
+  private async simulateViaEntrypoint(
+    originalPayload: ExecutionPayload,
+    calls: FunctionCall[],
+    feeExecutionPayload: ExecutionPayload | undefined,
+    gasSettings: GasSettings,
+    chainInfo: ChainInfo,
+    executionOptions: DefaultAccountEntrypointOptions,
+    from: AztecAddress,
+  ): Promise<{ result: TxSimulationResult; txReq: TxExecutionRequest }> {
+    const normalPayload = feeExecutionPayload
+      ? mergeExecutionPayloads([
+          feeExecutionPayload,
+          { ...originalPayload, calls },
+        ])
+      : { ...originalPayload, calls };
+
+    const { account, instance, artifact } =
+      await this.getFakeAccountDataFor(from);
+
+    const txReq = await account.createTxExecutionRequest(
+      normalPayload,
+      gasSettings,
+      chainInfo,
+      executionOptions,
+    );
+
+    const result = await this.pxe.simulateTx(txReq, true, true, true, {
+      contracts: { [from.toString()]: { instance, artifact } },
+    });
+
+    return { result, txReq };
+  }
+
   async createInteraction(
     executionPayload: ExecutionPayload,
-    opts: SimulateOptions
+    opts: SimulateOptions,
   ): Promise<WalletInteraction<WalletInteractionType>> {
     // Create interaction with simple title from args only
     const payloadHash = hashExecutionPayload(executionPayload);
@@ -246,7 +309,7 @@ export class SimulateTxOperation extends ExternalOperation<
       executionPayload,
       this.decodingCache,
       opts.from,
-      executionPayload.feePayer
+      executionPayload.feePayer,
     );
     const interaction = WalletInteraction.from({
       id: payloadHash,
@@ -265,7 +328,7 @@ export class SimulateTxOperation extends ExternalOperation<
 
   async requestAuthorization(
     displayData: SimulateTxDisplayData,
-    persistence?: PersistenceConfig
+    persistence?: PersistenceConfig,
   ): Promise<void> {
     // Update interaction with detailed title and status
     await this.emitProgress("REQUESTING AUTHORIZATION", undefined, false, {
@@ -295,7 +358,7 @@ export class SimulateTxOperation extends ExternalOperation<
   }
 
   async execute(
-    executionData: SimulateTxExecutionData
+    executionData: SimulateTxExecutionData,
   ): Promise<SimulateTxResult> {
     await this.emitProgress("SUCCESS", undefined, true);
     return executionData.simulationResult;
