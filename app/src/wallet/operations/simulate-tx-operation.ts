@@ -6,11 +6,9 @@ import {
 import type { AztecAddress } from "@aztec/stdlib/aztec-address";
 import {
   TxSimulationResult,
-  NestedProcessReturnValues,
   type TxExecutionRequest,
   type SimulationStats,
   type ExecutionPayload,
-  type PublicSimulationOutput,
   mergeExecutionPayloads,
 } from "@aztec/stdlib/tx";
 import type { PXE } from "@aztec/pxe/server";
@@ -36,23 +34,15 @@ import type { ContractInstanceWithAddress } from "@aztec/stdlib/contract";
 import type { ContractArtifact, FunctionCall } from "@aztec/stdlib/abi";
 import type { GasSettings } from "@aztec/stdlib/gas";
 import type { FieldsOf } from "@aztec/foundation/types";
-import type { FeeOptions } from "@aztec/wallet-sdk/base-wallet";
+import {
+  type FeeOptions,
+  extractOptimizablePublicStaticCalls,
+  simulateViaNode,
+  buildMergedSimulationResult,
+} from "@aztec/wallet-sdk/base-wallet";
 import type { ChainInfo } from "@aztec/entrypoints/interfaces";
 import type { AztecNode } from "@aztec/aztec.js/node";
-import {
-  PublicViewOptimizer,
-  extractPublicStaticCalls,
-  isPublicStaticCall,
-} from "../utils/public-view-optimizer";
 import type { Logger } from "@aztec/aztec.js/log";
-
-/** Result of merging return values from optimized and normal simulation paths */
-interface MergedReturnValues {
-  /** Return values in original call order */
-  ordered: NestedProcessReturnValues[];
-  /** Return values for optimized calls only, in their relative order */
-  optimized: NestedProcessReturnValues[];
-}
 
 // Readable transaction information with decoded data
 interface ReadableTxInformation {
@@ -120,7 +110,6 @@ export class SimulateTxOperation extends ExternalOperation<
   SimulateTxDisplayData
 > {
   protected interactionManager: InteractionManager;
-  private optimizer: PublicViewOptimizer;
 
   constructor(
     private pxe: PXE,
@@ -148,7 +137,6 @@ export class SimulateTxOperation extends ExternalOperation<
   ) {
     super();
     this.interactionManager = interactionManager;
-    this.optimizer = new PublicViewOptimizer(node, decodingCache, log);
   }
 
   async check(
@@ -200,30 +188,30 @@ export class SimulateTxOperation extends ExternalOperation<
     };
 
     // STEP 1: Separate calls into optimized (public static) and normal paths
-    const { publicStatic, other } = extractPublicStaticCalls(executionPayload);
-    const callOrder = executionPayload.calls.map((call) =>
-      isPublicStaticCall(call),
-    );
+    const { optimizableCalls, remainingCalls } =
+      extractOptimizablePublicStaticCalls(executionPayload);
 
     const chainInfo = await this.getChainInfo();
-    const blockHeader = await this.pxe.debug.getSyncedBlockHeader();
+    const blockHeader = await this.pxe.getSyncedBlockHeader();
 
     // STEP 2: Run both paths in parallel
     const [optimizedResults, normalResult] = await Promise.all([
-      publicStatic.length > 0
-        ? this.optimizer.optimizePublicStaticCalls(
-            publicStatic,
+      optimizableCalls.length > 0
+        ? simulateViaNode(
+            this.node,
+            optimizableCalls,
             opts.from,
             chainInfo,
             feeOptions.gasSettings,
             blockHeader,
+            opts.skipFeeEnforcement ?? true,
           )
         : Promise.resolve([]),
 
-      other.length > 0
-        ? this.runNormalSimulation(
+      remainingCalls.length > 0
+        ? this.simulateViaEntrypoint(
             executionPayload,
-            other,
+            remainingCalls,
             feeExecutionPayload,
             feeOptions.gasSettings,
             chainInfo,
@@ -233,20 +221,10 @@ export class SimulateTxOperation extends ExternalOperation<
         : Promise.resolve(null),
     ]);
 
-    // STEP 3: Extract and merge return values from both paths
-    const mergedReturnValues = this.mergeReturnValues(
+    // STEP 3: Build the final merged TxSimulationResult
+    const simulationResult = buildMergedSimulationResult(
       optimizedResults,
       normalResult?.result ?? null,
-      callOrder,
-      publicStatic.length,
-      other.length,
-    );
-
-    // STEP 4: Build the final merged TxSimulationResult
-    const simulationResult = this.buildMergedSimulationResult(
-      optimizedResults,
-      normalResult?.result ?? null,
-      mergedReturnValues.ordered,
     );
 
     await this.db.storeTxSimulation(payloadHash, simulationResult, {
@@ -254,7 +232,7 @@ export class SimulateTxOperation extends ExternalOperation<
       embeddedPaymentMethodFeePayer: executionPayload.feePayer?.toString(),
     });
 
-    // STEP 5: Decode the transaction (including optimized public calls if any)
+    // STEP 4: Decode the transaction (including optimized public calls if any)
     const decodingService = new TxDecodingService(this.decodingCache, this.log);
     const decoded = await decodingService.decodeTransaction(simulationResult);
 
@@ -288,7 +266,7 @@ export class SimulateTxOperation extends ExternalOperation<
   /**
    * Run the normal (non-optimized) simulation path for private/non-static calls.
    */
-  private async runNormalSimulation(
+  private async simulateViaEntrypoint(
     originalPayload: ExecutionPayload,
     calls: FunctionCall[],
     feeExecutionPayload: ExecutionPayload | undefined,
@@ -319,102 +297,6 @@ export class SimulateTxOperation extends ExternalOperation<
     });
 
     return { result, txReq };
-  }
-
-  /**
-   * Merge return values from optimized and normal simulation paths.
-   *
-   * @param optimizedResults - Results from the optimizer (one per batch)
-   * @param normalResult - Result from normal PXE simulation (null if no normal calls)
-   * @param callOrder - Boolean array indicating which calls were optimized (true) vs normal (false)
-   * @param expectedOptimizedCount - Number of optimized calls expected
-   * @param expectedNormalCount - Number of normal calls expected
-   * @returns Merged return values in original order and optimized-only subset
-   */
-  private mergeReturnValues(
-    optimizedResults: TxSimulationResult[],
-    normalResult: TxSimulationResult | null,
-    callOrder: boolean[],
-    expectedOptimizedCount: number,
-    expectedNormalCount: number,
-  ): MergedReturnValues {
-    // Extract return values from optimizer batches (flatten in order)
-    const optimizedReturnValues: NestedProcessReturnValues[] = [];
-    for (const batchResult of optimizedResults) {
-      const batchValues = batchResult.publicOutput?.publicReturnValues ?? [];
-      optimizedReturnValues.push(...batchValues);
-    }
-
-    // Extract return values from normal simulation
-    const normalReturnValues =
-      normalResult?.publicOutput?.publicReturnValues ?? [];
-
-    // Validate counts match expectations
-    if (optimizedReturnValues.length !== expectedOptimizedCount) {
-      this.log.warn(
-        `Optimizer returned ${optimizedReturnValues.length} return values, expected ${expectedOptimizedCount}`,
-      );
-    }
-    if (normalReturnValues.length !== expectedNormalCount) {
-      this.log.warn(
-        `Normal simulation returned ${normalReturnValues.length} return values, expected ${expectedNormalCount}`,
-      );
-    }
-
-    // Reconstruct return values in original call order
-    const orderedReturnValues: NestedProcessReturnValues[] = [];
-    let optIdx = 0;
-    let normIdx = 0;
-
-    for (const isOptimized of callOrder) {
-      if (isOptimized) {
-        orderedReturnValues.push(
-          optimizedReturnValues[optIdx++] ?? new NestedProcessReturnValues([]),
-        );
-      } else {
-        orderedReturnValues.push(
-          normalReturnValues[normIdx++] ?? new NestedProcessReturnValues([]),
-        );
-      }
-    }
-
-    return {
-      ordered: orderedReturnValues,
-      optimized: optimizedReturnValues,
-    };
-  }
-
-  /**
-   * Build the final merged TxSimulationResult from both paths.
-   *
-   * @param optimizedResults - Results from optimizer batches
-   * @param normalResult - Result from normal simulation (null if all calls were optimized)
-   * @param orderedReturnValues - Return values merged in original call order
-   * @returns A single TxSimulationResult combining both paths
-   */
-  private buildMergedSimulationResult(
-    optimizedResults: TxSimulationResult[],
-    normalResult: TxSimulationResult | null,
-    orderedReturnValues: NestedProcessReturnValues[],
-  ): TxSimulationResult {
-    // Use normal result as base if available (has richer private execution data)
-    const baseResult = normalResult ?? optimizedResults[0];
-
-    // Build merged public output with ordered return values
-    const mergedPublicOutput: PublicSimulationOutput | undefined =
-      baseResult.publicOutput
-        ? {
-            ...baseResult.publicOutput,
-            publicReturnValues: orderedReturnValues,
-          }
-        : undefined;
-
-    return new TxSimulationResult(
-      baseResult.privateExecutionResult,
-      baseResult.publicInputs,
-      mergedPublicOutput,
-      normalResult?.stats, // Stats only available from normal simulation
-    );
   }
 
   async createInteraction(
