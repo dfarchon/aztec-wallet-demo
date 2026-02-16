@@ -368,12 +368,12 @@ export function PhaseTimeline({
                 <Chip
                   label={`Preparing TX: ${formatDuration(preparingDuration)}`}
                   size="small"
-                  sx={{ height: 20, fontSize: "0.65rem" }}
+                  sx={{ height: 20, fontSize: "0.65rem", fontWeight: 600, bgcolor: "#1565c0", color: "white" }}
                 />
                 <Chip
                   label={`Mining: ${formatDuration(miningDuration)}`}
                   size="small"
-                  sx={{ height: 20, fontSize: "0.65rem", bgcolor: "#4caf50", color: "white" }}
+                  sx={{ height: 20, fontSize: "0.65rem", fontWeight: 600, bgcolor: "#4caf50", color: "white" }}
                 />
                 <Chip
                   label={`Total: ${formatDuration(totalDuration)}`}
