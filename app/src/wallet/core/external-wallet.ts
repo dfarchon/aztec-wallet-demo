@@ -2,9 +2,9 @@ import { type Account, type ChainInfo } from "@aztec/aztec.js/account";
 import {
   type Aliased,
   type SimulateOptions,
+  type SimulateUtilityOptions,
   type SendOptions,
   type BatchedMethod,
-  type BatchableMethods,
   type BatchResults,
   type PrivateEvent,
   type PrivateEventFilter,
@@ -135,6 +135,7 @@ export class ExternalWallet extends BaseNativeWallet {
       this.completeFeeOptions.bind(this),
       this.getFakeAccountDataFor.bind(this),
       this.getChainInfo.bind(this),
+      this.scopesFor.bind(this),
       this.cancellableTransactions,
       this.log,
     );
@@ -159,6 +160,7 @@ export class ExternalWallet extends BaseNativeWallet {
       this.createTxExecutionRequestFromPayloadAndFee.bind(this),
       this.completeFeeOptions.bind(this),
       this.contextualizeError.bind(this),
+      this.scopesFor.bind(this),
     );
   }
 
@@ -684,10 +686,9 @@ export class ExternalWallet extends BaseNativeWallet {
    */
   override async simulateUtility(
     call: FunctionCall,
-    authwits?: AuthWitness[],
-    scopes?: AztecAddress[],
+    opts: SimulateUtilityOptions,
   ): Promise<UtilitySimulationResult> {
     const op = this.createSimulateUtilityOperation();
-    return await op.executeStandalone(call, authwits, scopes);
+    return await op.executeStandalone(call, opts);
   }
 }

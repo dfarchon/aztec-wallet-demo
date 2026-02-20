@@ -132,6 +132,7 @@ export class SimulateTxOperation extends ExternalOperation<
       address: AztecAddress,
     ) => Promise<FakeAccountData>,
     private getChainInfo: () => Promise<ChainInfo>,
+    private scopesFor: (from: AztecAddress) => AztecAddress[],
     private cancellableTransactions: boolean,
     private log: Logger,
   ) {
@@ -292,8 +293,14 @@ export class SimulateTxOperation extends ExternalOperation<
       executionOptions,
     );
 
-    const result = await this.pxe.simulateTx(txReq, true, true, true, {
-      contracts: { [from.toString()]: { instance, artifact } },
+    const result = await this.pxe.simulateTx(txReq, {
+      scopes: this.scopesFor(from),
+      simulatePublic: true,
+      skipFeeEnforcement: true,
+      skipTxValidation: true,
+      overrides: {
+        contracts: { [from.toString()]: { instance, artifact } },
+      },
     });
 
     return { result, txReq };
