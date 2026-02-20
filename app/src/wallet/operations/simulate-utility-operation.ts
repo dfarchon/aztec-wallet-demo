@@ -10,6 +10,7 @@ import type {
   SimulationStats,
 } from "@aztec/stdlib/tx";
 import type { PXE } from "@aztec/pxe/server";
+import type { SimulateUtilityOptions } from "@aztec/aztec.js/wallet";
 import {
   WalletInteraction,
   type WalletInteractionType,
@@ -33,11 +34,7 @@ interface UtilityExecutionTrace {
 }
 
 // Arguments tuple for the operation
-type SimulateUtilityArgs = [
-  call: FunctionCall,
-  authwits?: AuthWitness[],
-  scopes?: AztecAddress[],
-];
+type SimulateUtilityArgs = [call: FunctionCall, opts: SimulateUtilityOptions];
 
 // Result type for the operation
 type SimulateUtilityResult = UtilitySimulationResult;
@@ -90,8 +87,7 @@ export class SimulateUtilityOperation extends ExternalOperation<
 
   async check(
     _call: FunctionCall,
-    _authwits?: AuthWitness[],
-    _scopes?: AztecAddress[]
+    _opts: SimulateUtilityOptions,
   ): Promise<SimulateUtilityResult | undefined> {
     // No early return checks for this operation
     return undefined;
@@ -99,8 +95,7 @@ export class SimulateUtilityOperation extends ExternalOperation<
 
   async createInteraction(
     call: FunctionCall,
-    _authwits?: AuthWitness[],
-    _scopes?: AztecAddress[]
+    _opts: SimulateUtilityOptions,
   ): Promise<WalletInteraction<WalletInteractionType>> {
     // Create interaction with simple title from args only
     const payloadHash = hashUtilityCall(call);
@@ -123,8 +118,7 @@ export class SimulateUtilityOperation extends ExternalOperation<
 
   async prepare(
     call: FunctionCall,
-    authwits?: AuthWitness[],
-    scopes?: AztecAddress[]
+    opts: SimulateUtilityOptions,
   ): Promise<
     PrepareResult<
       SimulateUtilityResult,
@@ -132,17 +126,11 @@ export class SimulateUtilityOperation extends ExternalOperation<
       SimulateUtilityExecutionData
     >
   > {
-    // NO TRY-CATCH - let errors throw naturally!
-
     // Generate hash for deduplication
     const payloadHash = hashUtilityCall(call);
 
     // Simulate the utility function
-    const simulationResult = await this.pxe.simulateUtility(
-      call,
-      authwits,
-      scopes
-    );
+    const simulationResult = await this.pxe.simulateUtility(call, { authwits: opts.authWitnesses, scopes: [opts.scope] });
 
     // Get contract name for better display
     const contractName = await this.decodingCache.getAddressAlias(call.to);
@@ -156,14 +144,14 @@ export class SimulateUtilityOperation extends ExternalOperation<
     const decodedArgs = await decoder.formatUtilityArguments(
       call.to,
       call.name,
-      call.args
+      call.args,
     );
 
     // Format the result (now an array of Fr that needs decoding based on return type)
     const formattedResult = await decoder.formatUtilityResult(
       call.to,
       call.name,
-      simulationResult.result
+      simulationResult.result,
     );
 
     const executionTrace = {
@@ -181,7 +169,7 @@ export class SimulateUtilityOperation extends ExternalOperation<
     await this.db.storeUtilityTrace(
       payloadHash,
       executionTrace,
-      simulationResult.stats
+      simulationResult.stats,
     );
 
     // Generate storage key for capability matching based on contract:function pattern
@@ -205,7 +193,7 @@ export class SimulateUtilityOperation extends ExternalOperation<
 
   async requestAuthorization(
     displayData: SimulateUtilityDisplayData,
-    persistence?: PersistenceConfig
+    persistence?: PersistenceConfig,
   ): Promise<void> {
     // Update interaction with detailed title and status
     await this.emitProgress("REQUESTING AUTHORIZATION", undefined, false, {
@@ -231,7 +219,7 @@ export class SimulateUtilityOperation extends ExternalOperation<
   }
 
   async execute(
-    executionData: SimulateUtilityExecutionData
+    executionData: SimulateUtilityExecutionData,
   ): Promise<SimulateUtilityResult> {
     // Execution is just returning the simulation result
     // The actual simulation happened in prepare phase

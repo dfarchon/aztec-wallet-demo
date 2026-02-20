@@ -84,7 +84,7 @@ export abstract class BaseNativeWallet
       appId,
       db,
       pendingAuthorizations,
-      this.interactionManager // Use interactionManager as the event emitter
+      this.interactionManager, // Use interactionManager as the event emitter
     );
   }
 
@@ -165,7 +165,6 @@ export abstract class BaseNativeWallet
   ): Promise<Account> {
     let account: Account | undefined;
     if (address.equals(AztecAddress.ZERO)) {
-      const chainInfo = await this.getChainInfo();
       account = new SignerlessAccount();
     } else {
       const { secretKey, salt, signingKey, type } =

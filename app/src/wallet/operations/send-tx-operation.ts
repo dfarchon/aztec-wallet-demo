@@ -3,7 +3,7 @@ import {
   type PrepareResult,
   type PersistenceConfig,
 } from "./base-operation";
-import type { AztecAddress } from "@aztec/stdlib/aztec-address";
+import { AztecAddress } from "@aztec/stdlib/aztec-address";
 import { TxHash } from "@aztec/stdlib/tx";
 import type { PXE } from "@aztec/pxe/server";
 import type {
@@ -118,6 +118,7 @@ export class SendTxOperation<
       gasSettings?: Partial<FieldsOf<GasSettings>>,
     ) => Promise<FeeOptions>,
     private contextualizeError: (err: unknown, context: string) => Error,
+    private scopesFor: (from: AztecAddress) => AztecAddress[],
   ) {
     super();
     this.interactionManager = interactionManager;
@@ -223,6 +224,7 @@ export class SendTxOperation<
         wait: opts.wait,
         payloadHash,
         simulationTime: prepared.displayData?.stats?.timings?.total,
+        from: opts.from.toString(),
       },
     };
   }
@@ -267,7 +269,10 @@ export class SendTxOperation<
 
     let provenTx: TxProvingResult;
     try {
-      provenTx = await this.pxe.proveTx(executionData.txRequest);
+      provenTx = await this.pxe.proveTx(
+        executionData.txRequest,
+        this.scopesFor(AztecAddress.fromString(executionData.from!)),
+      );
     } catch (provingError: unknown) {
       // Proving failed - offer to export debug data
       const errorMessage =
@@ -281,8 +286,13 @@ export class SendTxOperation<
       try {
         const profileResult = await this.pxe.profileTx(
           executionData.txRequest,
-          "execution-steps",
-          true, // skipProofGeneration - we just need the execution steps
+          {
+            profileMode: "execution-steps",
+            skipProofGeneration: true,
+            scopes: this.scopesFor(
+              AztecAddress.fromString(executionData.from!),
+            ),
+          },
         );
 
         // Serialize the execution steps to msgpack format

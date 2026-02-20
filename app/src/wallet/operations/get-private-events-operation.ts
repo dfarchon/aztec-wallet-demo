@@ -3,10 +3,7 @@ import {
   type PrepareResult,
   type PersistenceConfig,
 } from "./base-operation";
-import type {
-  PrivateEvent,
-  PrivateEventFilter,
-} from "@aztec/aztec.js/wallet";
+import type { PrivateEvent, PrivateEventFilter } from "@aztec/aztec.js/wallet";
 import type { EventMetadataDefinition } from "@aztec/stdlib/abi";
 import type { PXE } from "@aztec/pxe/server";
 import {
@@ -90,7 +87,7 @@ export class GetPrivateEventsOperation<T = any> extends ExternalOperation<
       status: "PREPARING",
       complete: false,
       title: "Get Private Events",
-      description: `Event: ${eventMetadata.eventSelector.name}`,
+      description: `Event: ${eventMetadata.eventSelector}`,
     });
 
     await this.interactionManager.storeAndEmit(interaction);
@@ -122,7 +119,7 @@ export class GetPrivateEventsOperation<T = any> extends ExternalOperation<
     }
 
     const displayData: GetPrivateEventsDisplayData = {
-      eventName: eventMetadata.eventSelector.name,
+      eventName: eventMetadata.eventSelector,
       fromBlock: eventFilter.fromBlock,
       toBlock: eventFilter.toBlock,
       eventCount: events.length,

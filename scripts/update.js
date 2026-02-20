@@ -4,7 +4,7 @@
  * Update demo-wallet to the latest Aztec nightly version.
  *
  * Usage:
- *   node scripts/update-to-nightly.js [--version VERSION] [--rollup-version VERSION] [--network ID]
+ *   node scripts/update.js [--version VERSION] [--rollup-version VERSION] [--network ID]
  */
 
 import { readFileSync, writeFileSync } from "fs";
@@ -103,10 +103,7 @@ async function fetchRollupVersion(nodeUrl) {
 
 function updatePackageJson(path, version) {
   let content = readFileSync(path, "utf-8");
-  content = content.replace(
-    /@aztec\/([^"]+)": "v4\.0\.0-nightly\.\d+"/g,
-    `@aztec/$1": "v${version}"`,
-  );
+  content = content.replace(/"(@aztec\/[^"]+)": "v[^"]+"/g, `"$1": "v${version}"`);
   writeFileSync(path, content, "utf-8");
 }
 

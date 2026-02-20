@@ -178,7 +178,10 @@ export class InternalWallet extends BaseNativeWallet {
         status: "PROVING",
       }),
     );
-    const provenTx = await this.pxe.proveTx(txRequest);
+    const provenTx = await this.pxe.proveTx(
+      txRequest,
+      this.scopesFor(opts.from),
+    );
     const provingTime = Date.now() - provingStartTime;
 
     const tx = await provenTx.toTx();
@@ -296,14 +299,16 @@ export class InternalWallet extends BaseNativeWallet {
     return await this.db.reconstructCapabilitiesFromKeys(appId);
   }
 
-  async capabilityToStorageKeys(capability: GrantedCapability): Promise<string[]> {
+  async capabilityToStorageKeys(
+    capability: GrantedCapability,
+  ): Promise<string[]> {
     return this.db.capabilityToStorageKeys(capability);
   }
 
   async storeCapabilityGrants(
     appId: string,
     manifest: AppCapabilities,
-    granted: GrantedCapability[]
+    granted: GrantedCapability[],
   ): Promise<void> {
     await this.db.storeCapabilityGrants(appId, granted);
   }

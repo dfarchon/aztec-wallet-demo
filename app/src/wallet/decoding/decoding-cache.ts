@@ -4,12 +4,6 @@ import type { ContractArtifact } from "@aztec/stdlib/abi";
 import type { WalletDB } from "../database/wallet-db";
 import type { ContractInstanceWithAddress } from "@aztec/stdlib/contract";
 
-interface ContractMetadata {
-  contractInstance?: {
-    currentContractClassId: any;
-  };
-}
-
 /**
  * Cache for contract metadata, artifacts, and address aliases to reduce expensive PXE queries.
  * Shared across CallAuthorizationFormatter and TxCallStackDecoder.
@@ -38,7 +32,9 @@ export class DecodingCache {
 
     const instance = await this.pxe.getContractInstance(address);
     if (!instance) {
-      throw new Error(`Contract instance not found for address ${address.toString()}`);
+      throw new Error(
+        `Contract instance not found for address ${address.toString()}`,
+      );
     }
     this.instanceCache.set(key, instance);
     return instance;
@@ -64,7 +60,10 @@ export class DecodingCache {
    * This allows artifacts from earlier operations in a batch to be available
    * for decoding in later operations, without persisting to PXE.
    */
-  cacheArtifactForBatch(contractClassId: any, artifact: ContractArtifact): void {
+  cacheArtifactForBatch(
+    contractClassId: any,
+    artifact: ContractArtifact,
+  ): void {
     const key = contractClassId.toString();
     this.artifactCache.set(key, artifact);
   }
