@@ -245,7 +245,7 @@ export default defineBackground(async () => {
   });
 
   browser.tabs.onUpdated.addListener((tabId, changeInfo) => {
-    if (changeInfo.status === "loading") {
+    if (changeInfo.status === "loading" && changeInfo.url) {
       sessionHandler.terminateForTab(tabId);
     }
   });
