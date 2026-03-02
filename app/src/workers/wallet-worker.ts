@@ -58,15 +58,15 @@ async function init(
   chainInfo: ChainInfo,
   appId: string,
   internalPort: MessagePortMain,
-  logPort: MessagePortMain
+  logPort: MessagePortMain,
 ) {
   const network = getNetworkByChainId(
     chainInfo.chainId.toNumber(),
-    chainInfo.version.toNumber()
+    chainInfo.version.toNumber(),
   );
   if (!network) {
     throw new Error(
-      `Unknown network: chainId=${chainInfo.chainId.toNumber()}, version=${chainInfo.version.toNumber()}`
+      `Unknown network: chainId=${chainInfo.chainId.toNumber()}, version=${chainInfo.version.toNumber()}`,
     );
   }
   const node = createAztecNodeClient(network.nodeUrl!);
@@ -104,7 +104,7 @@ async function init(
             dataDirectory: configOverrides.dataDirectory,
             dataStoreMapSizeKb: 2e10,
           },
-          createProxyLogger("pxe:data:lmdb", logPort)
+          createProxyLogger("pxe:data:lmdb", logPort).getBindings(),
         ),
         proverOrOptions: {
           backend: BackendType.NativeUnixSocket,
@@ -120,14 +120,14 @@ async function init(
           dataDirectory: resolve(keychainHomeDir, `wallet-${rollupAddress}`),
           dataStoreMapSizeKb: 2e10,
         },
-        walletDBLogger
+        walletDBLogger.getBindings(),
       );
       const db = WalletDB.init(walletDBStore, walletDBLogger);
 
       const pxe = await createPXE(
         node,
         { ...getPXEConfig(), ...configOverrides },
-        options
+        options,
       );
 
       const pendingAuthorizations = new Map<
@@ -156,11 +156,11 @@ async function init(
     const internalInit = async () => {
       const externalWalletLogger = createProxyLogger(
         `wallet:external:${appId}`,
-        logPort
+        logPort,
       );
       const internalWalletLogger = createProxyLogger(
         `wallet:internal:${appId}`,
-        logPort
+        logPort,
       );
 
       // Create both wallet instances sharing the same db, pxe and authorization logic
@@ -171,7 +171,7 @@ async function init(
         sharedResources.pendingAuthorizations,
         appId,
         chainInfo,
-        externalWalletLogger
+        externalWalletLogger,
       );
       const internalWallet = new InternalWallet(
         sharedResources.pxe,
@@ -180,7 +180,7 @@ async function init(
         sharedResources.pendingAuthorizations,
         appId,
         chainInfo,
-        internalWalletLogger
+        internalWalletLogger,
       );
 
       // Wire up events from both wallets to internal port
@@ -209,7 +209,7 @@ async function init(
                 version: chainInfo.version.toString(),
               },
             });
-          }
+          },
         );
 
         wallet.addEventListener(
@@ -224,7 +224,7 @@ async function init(
                 version: chainInfo.version.toString(),
               },
             });
-          }
+          },
         );
       };
 
@@ -249,14 +249,14 @@ const handleEvent = async (
   type: string,
   messageId: string,
   args: any[],
-  userLog: Logger
+  userLog: Logger,
 ) => {
   if (!schemaHasMethod(schema, type)) {
     throw new Error(`Unknown method: ${type}`);
   }
   const sanitizedArgs = await parseWithOptionals(
     args,
-    schema[type].parameters()
+    schema[type].parameters(),
   );
   let result;
   let error;
@@ -282,7 +282,7 @@ async function main() {
     console.error("Unhandled rejection in worker:", error);
     if (userLog) {
       userLog.error(
-        `Unhandled rejection ${typeof error.message == "object" ? inspect(error.message) : error.message}`
+        `Unhandled rejection ${typeof error.message == "object" ? inspect(error.message) : error.message}`,
       );
     }
   });
@@ -291,7 +291,7 @@ async function main() {
     console.error("Uncaught exception in worker:", error);
     if (userLog) {
       userLog.error(
-        `Unhandled rejection ${typeof error.message == "object" ? inspect(error.message) : error.message}`
+        `Unhandled rejection ${typeof error.message == "object" ? inspect(error.message) : error.message}`,
       );
     }
   });
@@ -323,7 +323,7 @@ async function main() {
           parsedChainInfo as unknown as ChainInfo,
           appId,
           internalPort,
-          logPort
+          logPort,
         );
         // Use external wallet for external requests
         handleEvent(
@@ -333,7 +333,7 @@ async function main() {
           type,
           messageId,
           args,
-          userLog
+          userLog,
         );
       });
       internalPort.on("message", async (event) => {
@@ -369,7 +369,7 @@ async function main() {
           parsedChainInfo as unknown as ChainInfo,
           appId,
           internalPort,
-          logPort
+          logPort,
         );
         // Use internal wallet for internal requests, except when handling
         // resolveAuthorization (which was always originated by the external one)
@@ -384,7 +384,7 @@ async function main() {
           type,
           messageId,
           args,
-          userLog
+          userLog,
         );
       });
       externalPort.start();
