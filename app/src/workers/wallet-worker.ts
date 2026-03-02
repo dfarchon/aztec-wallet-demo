@@ -12,7 +12,7 @@ import {
   InternalWalletInterfaceSchema,
   getNetworkByChainId,
 } from "@demo-wallet/shared";
-import { createProxyLogger } from "../wallet/utils/logger.ts";
+import { createProxyLogger } from "../utils/logger.ts";
 import type {
   AuthorizationRequest,
   AuthorizationResponse,

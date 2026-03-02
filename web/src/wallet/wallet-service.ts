@@ -24,7 +24,6 @@ import {
   type AuthorizationRequest,
   type AuthorizationResponse,
   getNetworkByChainId,
-  createProxyLogger,
 } from "@demo-wallet/shared";
 import {
   createPXE,
@@ -98,9 +97,9 @@ export async function getOrCreateSession(
 
       const options: PXECreationOptions = {
         loggers: {
-          store: createProxyLogger("pxe:data:lmdb"),
-          pxe: createProxyLogger("pxe:service"),
-          prover: createProxyLogger("bb:native"),
+          store: createLogger("pxe:data:lmdb"),
+          pxe: createLogger("pxe:service"),
+          prover: createLogger("bb:native"),
         },
         store: await createStore(
           `pxe-${rollupAddress}`,
@@ -109,11 +108,11 @@ export async function getOrCreateSession(
             dataStoreMapSizeKb: 2e10,
           },
           2,
-          createProxyLogger("pxe:data:lmdb"),
+          createLogger("pxe:data:lmdb"),
         ),
       };
 
-      const walletDBLogger = createProxyLogger("wallet:data:lmdb");
+      const walletDBLogger = createLogger("wallet:data:lmdb");
       const walletDBStore = await createStore(
         `wallet-${rollupAddress}`,
         {
@@ -184,9 +183,15 @@ export async function getOrCreateSession(
         wallet.addEventListener("authorization-request", (event: Event) => {
           onWalletEvent("authorization-request", (event as CustomEvent).detail);
         });
-        wallet.addEventListener("proof-debug-export-request", (event: Event) => {
-          onWalletEvent("proof-debug-export-request", (event as CustomEvent).detail);
-        });
+        wallet.addEventListener(
+          "proof-debug-export-request",
+          (event: Event) => {
+            onWalletEvent(
+              "proof-debug-export-request",
+              (event as CustomEvent).detail,
+            );
+          },
+        );
       };
 
       wireEvents(externalWallet);
