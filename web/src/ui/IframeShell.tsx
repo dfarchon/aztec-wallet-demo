@@ -11,7 +11,6 @@
  */
 
 import { StrictMode, useMemo, useState, useEffect, useRef, useCallback } from "react";
-import "./index.css";
 import {
   createTheme,
   CssBaseline,
@@ -19,21 +18,24 @@ import {
   ThemeProvider,
   Dialog,
 } from "@mui/material";
-import { colors } from "./styles.ts";
-import { WalletContext } from "./renderer.tsx";
-import { AuthorizationDialog } from "./components/dialogs/AuthorizationDialog.tsx";
-import { EmojiVerification } from "./components/EmojiVerification.tsx";
-import { NetworkProvider, useNetwork } from "./contexts/NetworkContext.tsx";
-import { networkToChainInfo } from "../config/networks.ts";
+import {
+  colors,
+  WalletContext,
+  NetworkProvider,
+  useNetwork,
+  networkToChainInfo,
+  type AuthorizationRequest,
+  App,
+  AuthorizationDialog,
+} from "@demo-wallet/shared";
 import { WalletApi, emitWalletUpdate } from "./utils/wallet-api.ts";
 import {
   IframeConnectionHandler,
   type IframeConnectionConfig,
 } from "../wallet/iframe-connection-handler.ts";
 import { getOrCreateSession } from "../wallet/wallet-service.ts";
-import type { AuthorizationRequest } from "../wallet/types/authorization.ts";
+import { EmojiVerification } from "./components/EmojiVerification.tsx";
 import { Fr } from "@aztec/aztec.js/fields";
-import { App } from "./App.tsx";
 
 const themeOptions: ThemeOptions = {
   palette: {

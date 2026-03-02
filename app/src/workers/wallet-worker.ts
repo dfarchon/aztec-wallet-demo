@@ -5,8 +5,18 @@ import { Fr } from "@aztec/aztec.js/fields";
 import { parseWithOptionals, schemaHasMethod } from "@aztec/foundation/schemas";
 import { jsonStringify } from "@aztec/foundation/json-rpc";
 import type { MessagePortMain } from "electron";
-import { ExternalWallet } from "../wallet/core/external-wallet.ts";
-import { InternalWalletInterfaceSchema } from "../ipc/wallet-internal-interface.ts";
+import {
+  ExternalWallet,
+  InternalWallet,
+  WalletDB,
+  InternalWalletInterfaceSchema,
+  getNetworkByChainId,
+} from "@demo-wallet/shared";
+import { createProxyLogger } from "../wallet/utils/logger.ts";
+import type {
+  AuthorizationRequest,
+  AuthorizationResponse,
+} from "@demo-wallet/shared";
 import {
   createPXE,
   getPXEConfig,
@@ -17,19 +27,11 @@ import { schemas } from "@aztec/stdlib/schemas";
 
 import { createStore } from "@aztec/kv-store/lmdb-v2";
 import { resolve, join } from "node:path";
-import { createProxyLogger } from "../wallet/utils/logger.ts";
-import { WalletDB } from "../wallet/database/wallet-db.ts";
 import { z } from "zod";
 import { homedir } from "node:os";
 import { inspect } from "node:util";
 import type { PromiseWithResolvers } from "@aztec/foundation/promise";
-import type {
-  AuthorizationRequest,
-  AuthorizationResponse,
-} from "../wallet/types/authorization.ts";
 import type { Logger } from "pino";
-import { InternalWallet } from "../wallet/core/internal-wallet.ts";
-import { getNetworkByChainId } from "../config/networks.ts";
 import { BackendType } from "@aztec/bb.js";
 
 const ChainInfoSchema = z.object({

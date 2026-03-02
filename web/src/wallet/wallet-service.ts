@@ -17,14 +17,15 @@ import { type ChainInfo } from "@aztec/aztec.js/account";
 import { Fr } from "@aztec/aztec.js/fields";
 import { createLogger } from "@aztec/aztec.js/log";
 import { type PromiseWithResolvers } from "@aztec/foundation/promise";
-import { ExternalWallet } from "./core/external-wallet.ts";
-import { InternalWallet } from "./core/internal-wallet.ts";
-import { WalletDB } from "./database/wallet-db.ts";
-import { getNetworkByChainId } from "../config/networks.ts";
-import type {
-  AuthorizationRequest,
-  AuthorizationResponse,
-} from "./types/authorization.ts";
+import {
+  ExternalWallet,
+  InternalWallet,
+  WalletDB,
+  type AuthorizationRequest,
+  type AuthorizationResponse,
+  getNetworkByChainId,
+  createProxyLogger,
+} from "@demo-wallet/shared";
 import {
   createPXE,
   getPXEConfig,
@@ -32,7 +33,6 @@ import {
   type PXECreationOptions,
 } from "@aztec/pxe/client/lazy";
 import { createStore } from "@aztec/kv-store/indexeddb";
-import { createProxyLogger } from "./index.ts";
 
 type SessionData = {
   sharedResources: Promise<{

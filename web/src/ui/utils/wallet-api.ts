@@ -7,9 +7,8 @@
  */
 
 import { type Fr } from "@aztec/foundation/schemas";
-import type { InternalWalletInterface } from "../../ipc/wallet-internal-interface.ts";
+import type { InternalWalletInterface, AuthorizationResponse } from "@demo-wallet/shared";
 import { getOrCreateSession } from "../../wallet/wallet-service.ts";
-import type { AuthorizationResponse } from "../../wallet/types/authorization.ts";
 
 // Event emitter for wallet update and authorization request events.
 // These are global because they are session-level (not per-API instance).
@@ -115,10 +114,8 @@ export class WalletApi {
         // resolveAuthorization is handled specially — not on InternalWallet directly
         if (propStr === "resolveAuthorization") {
           return async (response: AuthorizationResponse) => {
-            const wallet = await getInternalWallet(target.chainId, target.version);
             // InternalWallet doesn't expose resolveAuthorization directly;
             // it lives in the shared pendingAuthorizations map accessed via the session.
-            // We reach it via getOrCreateSession and resolve there.
             await resolveAuthorizationViaSession(target.chainId, target.version, response);
           };
         }

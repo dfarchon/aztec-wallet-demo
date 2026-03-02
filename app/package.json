@@ -1,6 +1,5 @@
 {
   "name": "app",
-  "packageManager": "yarn@4.5.2",
   "productName": "app",
   "version": "1.0.0",
   "description": "My Electron application description",
@@ -73,6 +72,7 @@
     "@aztec/pxe": "v4.0.0-devnet.2-patch.3",
     "@aztec/stdlib": "v4.0.0-devnet.2-patch.3",
     "@aztec/wallet-sdk": "v4.0.0-devnet.2-patch.3",
+    "@demo-wallet/shared": "workspace:*",
     "@emotion/react": "^11.14.0",
     "@emotion/styled": "^11.14.0",
     "@fontsource/roboto": "^5.1.1",

@@ -1,15 +1,11 @@
 {
-  "name": "web-wallet",
+  "name": "@demo-wallet/shared",
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "scripts": {
-    "dev": "vite",
-    "build": "tsc -b && vite build",
-    "preview": "vite preview",
-    "lint": "eslint .",
-    "local-aztec:enable": "node scripts/toggle-local-aztec.js enable && corepack yarn install",
-    "local-aztec:disable": "node scripts/toggle-local-aztec.js disable && corepack yarn install"
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
   },
   "dependencies": {
     "@aztec/accounts": "v4.0.0-devnet.2-patch.3",
@@ -23,7 +19,6 @@
     "@aztec/pxe": "v4.0.0-devnet.2-patch.3",
     "@aztec/stdlib": "v4.0.0-devnet.2-patch.3",
     "@aztec/wallet-sdk": "v4.0.0-devnet.2-patch.3",
-    "@demo-wallet/shared": "workspace:*",
     "@emotion/react": "^11.14.0",
     "@emotion/styled": "^11.14.0",
     "@fontsource/roboto": "^5.1.1",
@@ -38,10 +33,6 @@
   "devDependencies": {
     "@types/react": "^18.3.1",
     "@types/react-dom": "^18.3.1",
-    "@vitejs/plugin-react-swc": "^3.5.0",
-    "eslint": "^9.17.0",
-    "typescript": "~5.6.2",
-    "vite": "^5.4.20",
-    "vite-plugin-node-polyfills": "^0.24.0"
+    "typescript": "~5.6.2"
   }
 }

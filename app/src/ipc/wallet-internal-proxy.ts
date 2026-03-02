@@ -4,15 +4,13 @@ import {
 } from "@aztec/foundation/promise";
 import { schemaHasMethod } from "@aztec/foundation/schemas";
 import type { MessagePortMain } from "electron/main";
-import type { AuthorizationRequest } from "../wallet/types/authorization";
-import type { WalletInteraction } from "../wallet/types/wallet-interaction";
 import {
   type InternalWalletInterface,
   InternalWalletInterfaceSchema,
   type OnAuthorizationRequestListener,
   type OnProofDebugExportRequestListener,
   type OnWalletUpdateListener,
-} from "./wallet-internal-interface";
+} from "@demo-wallet/shared";
 
 type FunctionsOf<T> = {
   [K in keyof T as T[K] extends Function ? K : never]: T[K];
