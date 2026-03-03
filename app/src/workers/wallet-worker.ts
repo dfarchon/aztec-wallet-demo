@@ -11,12 +11,12 @@ import {
   WalletDB,
   InternalWalletInterfaceSchema,
   getNetworkByChainId,
-} from "@demo-wallet/shared";
+} from "@demo-wallet/shared/core";
 import { createProxyLogger } from "../utils/logger.ts";
 import type {
   AuthorizationRequest,
   AuthorizationResponse,
-} from "@demo-wallet/shared";
+} from "@demo-wallet/shared/core";
 import {
   createPXE,
   getPXEConfig,

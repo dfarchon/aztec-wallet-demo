@@ -7,7 +7,7 @@
  */
 
 import { type Fr } from "@aztec/foundation/schemas";
-import type { InternalWalletInterface, AuthorizationResponse } from "@demo-wallet/shared";
+import type { InternalWalletInterface, AuthorizationResponse } from "@demo-wallet/shared/core";
 import { getOrCreateSession } from "../../wallet/wallet-service.ts";
 
 // Event emitter for wallet update and authorization request events.

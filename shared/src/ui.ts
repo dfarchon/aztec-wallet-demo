@@ -1,7 +1,5 @@
-// @demo-wallet/shared — barrel export for all shared wallet and UI code
-export * from "./config/networks.ts";
-export * from "./ipc/wallet-internal-interface.ts";
-export * from "./wallet/index.ts";
+// @demo-wallet/shared/ui — UI components only (no wallet core)
+// Import @demo-wallet/shared/core for wallet logic, config, and IPC types
 export * from "./ui/App.tsx";
 export * from "./ui/renderer.tsx";
 export * from "./ui/styles.ts";

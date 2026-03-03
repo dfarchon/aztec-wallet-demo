@@ -20,8 +20,8 @@
     "allowArbitraryExtensions": true,
     "allowSyntheticDefaultImports": true,
     "paths": {
-      "@demo-wallet/shared": ["./src/index.ts"],
-      "@demo-wallet/shared/*": ["./src/*"]
+      "@demo-wallet/shared/ui": ["./src/ui.ts"],
+      "@demo-wallet/shared/core": ["./src/core.ts"]
     }
   },
   "include": ["src/**/*"]

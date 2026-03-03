@@ -23,11 +23,13 @@ import {
   WalletContext,
   NetworkProvider,
   useNetwork,
-  networkToChainInfo,
-  type AuthorizationRequest,
   App,
   AuthorizationDialog,
-} from "@demo-wallet/shared";
+} from "@demo-wallet/shared/ui";
+import {
+  networkToChainInfo,
+  type AuthorizationRequest,
+} from "@demo-wallet/shared/core";
 import { WalletApi, emitWalletUpdate } from "./utils/wallet-api.ts";
 import {
   IframeConnectionHandler,

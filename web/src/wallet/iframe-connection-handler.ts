@@ -32,7 +32,7 @@ import { WalletSchema } from "@aztec/aztec.js/wallet";
 import { parseWithOptionals, schemaHasMethod } from "@aztec/foundation/schemas";
 import { jsonStringify } from "@aztec/foundation/json-rpc";
 import { createLogger } from "@aztec/aztec.js/log";
-import type { ExternalWallet } from "@demo-wallet/shared";
+import type { ExternalWallet } from "@demo-wallet/shared/core";
 
 // ─── Internal message types (mirrors extension's internal_message_types.ts) ───
 

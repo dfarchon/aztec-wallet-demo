@@ -7,5 +7,5 @@
  * main.tsx is the entry point — it handles mounting based on iframe detection.
  */
 
-export { Root, WalletContext } from "@demo-wallet/shared";
+export { Root, WalletContext } from "@demo-wallet/shared/ui";
 export { WalletApi } from "./utils/wallet-api.ts";

@@ -8,7 +8,7 @@
  * main.tsx handles mounting.
  */
 
-import { Root } from "@demo-wallet/shared";
+import { Root } from "@demo-wallet/shared/ui";
 import { WalletApi } from "./utils/wallet-api.ts";
 
 export function StandaloneShell() {

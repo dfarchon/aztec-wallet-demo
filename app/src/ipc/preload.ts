@@ -5,7 +5,7 @@ import type { TxHash, TxReceipt } from "@aztec/stdlib/tx";
 import type {
   WalletInteraction,
   WalletInteractionType,
-} from "@demo-wallet/shared";
+} from "@demo-wallet/shared/core";
 
 contextBridge.exposeInMainWorld("walletAPI", {
   getTxReceipt(stringifiedArgs: string): Promise<TxReceipt> {

@@ -20,7 +20,7 @@ type CustomWalker = CopyClass<Walker> & {
   modules: Module[];
   walkDependenciesForModule: (
     moduleRoot: string,
-    depType: DepType
+    depType: DepType,
   ) => Promise<void>;
 };
 
@@ -48,7 +48,7 @@ const config: ForgeConfig = {
     async packageAfterCopy(_forgeConfig, buildPath) {
       const depsToCopy = new Set<string>(externalDependencies);
 
-      const sourceNodeModulesPath = path.resolve(__dirname, "node_modules");
+      const sourceNodeModulesPath = path.resolve(__dirname, "../node_modules");
       const destNodeModulesPath = path.resolve(buildPath, "node_modules");
 
       console.log(`Copying external dependencies and their transitive deps...`);
@@ -56,12 +56,12 @@ const config: ForgeConfig = {
 
       for (const dep of externalDependencies) {
         const walker = new Walker(
-          path.join(sourceNodeModulesPath, dep)
+          path.join(sourceNodeModulesPath, dep),
         ) as unknown as CustomWalker;
 
         await walker.walkDependenciesForModule(
           path.join(sourceNodeModulesPath, dep),
-          DepType.PROD
+          DepType.PROD,
         );
 
         walker.modules.forEach((treeDep) => {
@@ -70,7 +70,7 @@ const config: ForgeConfig = {
       }
 
       console.log(
-        `Total packages to copy (including transitive): ${depsToCopy.size}`
+        `Total packages to copy (including transitive): ${depsToCopy.size}`,
       );
 
       await Promise.all(
@@ -79,7 +79,7 @@ const config: ForgeConfig = {
           const sourcePackageName = dependencyMap[packageName] || packageName;
           const sourcePath = path.join(
             sourceNodeModulesPath,
-            sourcePackageName
+            sourcePackageName,
           );
           const destPath = path.join(destNodeModulesPath, packageName);
 
@@ -96,7 +96,7 @@ const config: ForgeConfig = {
             recursive: true,
             preserveTimestamps: true,
           });
-        })
+        }),
       );
 
       console.log("✓ External dependencies copied successfully");

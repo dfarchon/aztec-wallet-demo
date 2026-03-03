@@ -10,7 +10,7 @@ import {
   type OnAuthorizationRequestListener,
   type OnProofDebugExportRequestListener,
   type OnWalletUpdateListener,
-} from "@demo-wallet/shared";
+} from "@demo-wallet/shared/core";
 
 type FunctionsOf<T> = {
   [K in keyof T as T[K] extends Function ? K : never]: T[K];

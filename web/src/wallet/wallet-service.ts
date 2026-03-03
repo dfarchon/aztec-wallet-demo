@@ -24,7 +24,7 @@ import {
   type AuthorizationRequest,
   type AuthorizationResponse,
   getNetworkByChainId,
-} from "@demo-wallet/shared";
+} from "@demo-wallet/shared/core";
 import {
   createPXE,
   getPXEConfig,
