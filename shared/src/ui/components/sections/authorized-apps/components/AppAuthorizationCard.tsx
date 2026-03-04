@@ -14,7 +14,7 @@ import {
 } from "@mui/icons-material";
 import { WalletContext } from "../../../../renderer";
 import { AztecAddress } from "@aztec/aztec.js/addresses";
-import type { GrantedCapability, AppCapabilities, CAPABILITY_VERSION } from "@aztec/aztec.js/wallet";
+import type { GrantedCapability, AppCapabilities, CAPABILITY_VERSION, Capability } from "@aztec/aztec.js/wallet";
 import type { AuthorizationItem, RequestCapabilitiesParams } from "../../../../../wallet/types/authorization";
 import { AuthorizeCapabilitiesContent } from "../../../authorization/AuthorizeCapabilitiesContent";
 
@@ -31,6 +31,7 @@ export function AppAuthorizationCard({
 }: AppAuthorizationCardProps) {
   const { walletAPI } = useContext(WalletContext);
   const [capabilities, setCapabilities] = useState<GrantedCapability[]>([]);
+  const [requestedManifest, setRequestedManifest] = useState<AppCapabilities | null>(null);
   const [loading, setLoading] = useState(true);
   const [revoking, setRevoking] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -53,8 +54,12 @@ export function AppAuthorizationCard({
   const loadCapabilities = async () => {
     try {
       setLoading(true);
-      const caps = await walletAPI.getAppCapabilities(appId);
+      const [caps, manifest] = await Promise.all([
+        walletAPI.getAppCapabilities(appId),
+        walletAPI.getAppRequestedManifest(appId),
+      ]);
       setCapabilities(caps);
+      setRequestedManifest(manifest ?? null);
       console.log("[AppAuthorizationCard] Loaded capabilities:", caps);
     } catch (err) {
       console.error("Failed to load app capabilities:", err);
@@ -140,24 +145,27 @@ export function AppAuthorizationCard({
   // Build it asynchronously when capabilities change
   useEffect(() => {
     const buildFakeRequest = async () => {
-      if (loading || capabilities.length === 0) {
+      if (loading) {
         setFakeRequest(null);
         return;
       }
 
-      const manifest: AppCapabilities = {
+      // Use the stored original manifest when available — it includes ALL capabilities
+      // the app requested, even ones the user denied. Fall back to granted capabilities only.
+      const manifest: AppCapabilities = requestedManifest ?? {
         version: "1.0" as typeof CAPABILITY_VERSION,
-        metadata: {
-          name: appId,
-          version: "1.0.0",
-        },
-        capabilities: capabilities,
+        metadata: { name: appId, version: "1.0.0" },
+        capabilities: capabilities as unknown as Capability[],
       };
 
-      // Build existingGrants from the loaded capabilities
-      // All storage keys for these capabilities should be marked as granted (true)
-      const existingGrants: Record<string, boolean> = {};
+      if (manifest.capabilities.length === 0) {
+        setFakeRequest(null);
+        return;
+      }
 
+      // Build existingGrants from the currently-granted capabilities
+      // so AuthorizeCapabilitiesContent pre-checks only what was actually granted
+      const existingGrants: Record<string, boolean> = {};
       for (const capability of capabilities) {
         const keys = await walletAPI.capabilityToStorageKeys(capability);
         for (const key of keys) {
@@ -174,14 +182,14 @@ export function AppAuthorizationCard({
           newCapabilityIndices: [],
           contractNames: {},
           existingGrants,
-          isAppFirstTime: false, // This is an existing app with grants
+          isAppFirstTime: false,
         },
         timestamp: Date.now(),
       });
     };
 
     buildFakeRequest();
-  }, [loading, capabilities, appId, walletAPI]);
+  }, [loading, capabilities, requestedManifest, appId, walletAPI]);
 
   return (
     <Card sx={{ width: "100%", position: "relative" }}>
@@ -216,17 +224,17 @@ export function AppAuthorizationCard({
           <Typography variant="body2" color="text.secondary">
             Loading...
           </Typography>
-        ) : capabilities.length === 0 ? (
-          <Alert severity="warning">
-            No authorizations found for this app
-          </Alert>
         ) : fakeRequest ? (
           <AuthorizeCapabilitiesContent
             request={fakeRequest}
             onCapabilitiesChange={handleCapabilitiesChange}
             showAppId={false}
           />
-        ) : null}
+        ) : (
+          <Alert severity="warning">
+            No capability manifest found for this app
+          </Alert>
+        )}
       </CardContent>
     </Card>
   );

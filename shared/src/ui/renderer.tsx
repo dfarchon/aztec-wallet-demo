@@ -14,6 +14,15 @@ import { networkToChainInfo } from "../config/networks.ts";
 import type { Fr } from "@aztec/foundation/schemas";
 
 const themeOptions: ThemeOptions = {
+  breakpoints: {
+    values: {
+      xs: 0,
+      sm: 360,
+      md: 700,
+      lg: 1200,
+      xl: 1536,
+    },
+  },
   palette: {
     mode: "dark",
     primary: {

@@ -4,6 +4,7 @@ import { FunctionCallDisplay } from "./FunctionCallDisplay";
 export interface PublicCallDisplayProps {
   call: PublicCallEvent;
   accordionBgColor?: string;
+  compact?: boolean;
 }
 
 /**
@@ -13,6 +14,7 @@ export interface PublicCallDisplayProps {
 export function PublicCallDisplay({
   call,
   accordionBgColor = "rgba(255, 152, 0, 0.15)",
+  compact = false,
 }: PublicCallDisplayProps) {
   return (
     <FunctionCallDisplay
@@ -28,6 +30,7 @@ export function PublicCallDisplay({
       depth={call.depth}
       isStaticCall={call.isStaticCall}
       accordionBgColor={accordionBgColor}
+      compact={compact}
     />
   );
 }

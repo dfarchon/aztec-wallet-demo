@@ -29,7 +29,7 @@ export function NetworkSelector() {
         disabled={isNetworkSwitching}
         size="small"
         sx={{
-          minWidth: 150,
+          minWidth: 80,
           "& .MuiSelect-select": {
             display: "flex",
             alignItems: "center",

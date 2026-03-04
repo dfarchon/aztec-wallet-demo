@@ -25,6 +25,7 @@ export interface FunctionCallDisplayProps {
   needsAuth?: boolean;
   nestedContent?: ReactNode;
   accordionBgColor?: string;
+  compact?: boolean;
 }
 
 export function FunctionCallDisplay({
@@ -42,42 +43,77 @@ export function FunctionCallDisplay({
   needsAuth = false,
   nestedContent,
   accordionBgColor = "rgba(0, 0, 0, 0.01)",
+  compact = false,
 }: FunctionCallDisplayProps) {
   const hasArgs = args.length > 0;
   const hasReturnValues = returnValues.length > 0;
+  // In compact mode, reduce nesting indent to avoid consuming too much width
+  const indent = compact ? Math.min(depth, 3) * 1 : Math.min(depth, 4) * 2;
 
   return (
     <Box
       sx={{
-        ml: depth * 3,
-        mb: 1,
+        ml: indent,
+        mb: compact ? 0.5 : 1,
         borderLeft: depth > 0 ? "2px solid" : "none",
         borderColor: accentColor,
-        pl: depth > 0 ? 2 : 0,
+        pl: depth > 0 ? (compact ? 1 : 2) : 0,
+        // minWidth:0 allows flex children to shrink below their content size (needed for text truncation)
+        minWidth: 0,
+        overflow: "hidden",
       }}
     >
       <Accordion
         sx={{
           bgcolor: accordionBgColor,
-          boxShadow: 1,
+          boxShadow: compact ? 0 : 1,
           border: "1px solid",
           borderColor: "divider",
         }}
       >
-        <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+        <AccordionSummary
+          expandIcon={<ExpandMoreIcon fontSize={compact ? "small" : "medium"} />}
+          sx={compact ? {
+            minHeight: "32px !important",
+            "& .MuiAccordionSummary-content": { my: "4px !important", width: "100%", minWidth: 0, overflow: "hidden" },
+            px: 1,
+          } : undefined}
+        >
           <Box
             sx={{
               display: "flex",
               alignItems: "center",
-              gap: 1,
-              flexWrap: "wrap",
-              width: "100%",
+              gap: compact ? 0.5 : 1,
+              // In compact mode: single row, truncate title rather than wrap
+              ...(compact ? {
+                width: "100%",
+                overflow: "hidden",
+                flexWrap: "nowrap",
+              } : {
+                flexWrap: "wrap",
+                width: "100%",
+              }),
             }}
           >
-            <CallMadeIcon fontSize="small" sx={{ color: accentColor }} />
+            <CallMadeIcon
+              fontSize="small"
+              sx={{ color: accentColor, flexShrink: 0, fontSize: compact ? "0.875rem" : undefined }}
+            />
             <Typography
               variant="body2"
-              sx={{ fontFamily: "monospace", fontWeight: "medium" }}
+              sx={{
+                fontFamily: "monospace",
+                fontWeight: "medium",
+                fontSize: compact ? "0.75rem" : undefined,
+                // In compact mode truncate with ellipsis; otherwise wrap as before
+                ...(compact ? {
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                  flexShrink: 1,
+                  minWidth: 0,
+                } : {}),
+              }}
             >
               {contractName}.{functionName}({hasArgs ? "..." : ""})
             </Typography>
@@ -86,9 +122,9 @@ export function FunctionCallDisplay({
               size="small"
               color={typeChipColor}
               variant="outlined"
-              sx={{ ml: 0.5 }}
+              sx={{ ml: compact ? 0 : 0.5, flexShrink: 0, height: compact ? 16 : undefined, fontSize: compact ? "0.6rem" : undefined }}
             />
-            {needsAuth && (
+            {needsAuth && !compact && (
               <Chip
                 icon={<VpnKeyIcon />}
                 label="Requires Authorization"
@@ -97,10 +133,20 @@ export function FunctionCallDisplay({
                 variant="filled"
               />
             )}
-            {isStaticCall && (
+            {needsAuth && compact && (
+              <Chip
+                icon={<VpnKeyIcon />}
+                label="Auth"
+                size="small"
+                color="warning"
+                variant="filled"
+                sx={{ flexShrink: 0, height: 16, fontSize: "0.6rem" }}
+              />
+            )}
+            {isStaticCall && !compact && (
               <Chip label="static" size="small" variant="outlined" />
             )}
-            {hasReturnValues && (
+            {hasReturnValues && !compact && (
               <Typography
                 variant="caption"
                 color="text.secondary"
@@ -111,29 +157,29 @@ export function FunctionCallDisplay({
             )}
           </Box>
         </AccordionSummary>
-        <AccordionDetails>
-          <Box>
+        <AccordionDetails sx={compact ? { px: 1, py: 0.5 } : undefined}>
+          <Box sx={{ width: "100%", overflow: "hidden" }}>
             {/* Arguments (if available) - Show first as most important */}
             {hasArgs && (
-              <Box sx={{ mb: 2 }}>
+              <Box sx={{ mb: compact ? 1 : 2 }}>
                 <Typography
                   variant="subtitle2"
-                  sx={{ fontWeight: "bold", color: accentColor }}
+                  sx={{ fontWeight: "bold", color: accentColor, fontSize: compact ? "0.7rem" : undefined }}
                   gutterBottom
                 >
                   Arguments:
                 </Typography>
                 <Box
                   sx={{
-                    p: 1.5,
+                    p: compact ? 1 : 1.5,
                     bgcolor: "action.hover",
                     borderRadius: 1,
                     border: "1px solid",
                     borderColor: "divider",
                     display: "grid",
                     gridTemplateColumns: "auto 1fr",
-                    gap: 1,
-                    columnGap: 2,
+                    gap: compact ? 0.5 : 1,
+                    columnGap: compact ? 1 : 2,
                     alignItems: "start",
                   }}
                 >
@@ -143,10 +189,11 @@ export function FunctionCallDisplay({
                         key={`${i}-name`}
                         sx={{
                           fontFamily: "monospace",
-                          fontSize: "0.875rem",
+                          fontSize: compact ? "0.7rem" : "0.875rem",
                           fontWeight: "medium",
                           color: accentColor,
-                          whiteSpace: "nowrap",
+                          whiteSpace: "normal",
+                          wordBreak: "break-word",
                         }}
                       >
                         {arg.name}:
@@ -155,7 +202,7 @@ export function FunctionCallDisplay({
                         key={`${i}-value`}
                         sx={{
                           fontFamily: "monospace",
-                          fontSize: "0.8125rem",
+                          fontSize: compact ? "0.7rem" : "0.8125rem",
                           wordBreak: "break-all",
                         }}
                       >
@@ -169,25 +216,25 @@ export function FunctionCallDisplay({
 
             {/* Return Values */}
             {hasReturnValues && (
-              <Box sx={{ mb: 2 }}>
+              <Box sx={{ mb: compact ? 1 : 2 }}>
                 <Typography
                   variant="subtitle2"
-                  sx={{ fontWeight: "bold", color: accentColor }}
+                  sx={{ fontWeight: "bold", color: accentColor, fontSize: compact ? "0.7rem" : undefined }}
                   gutterBottom
                 >
                   Return Values:
                 </Typography>
                 <Box
                   sx={{
-                    p: 1.5,
+                    p: compact ? 1 : 1.5,
                     bgcolor: "action.hover",
                     borderRadius: 1,
                     border: "1px solid",
                     borderColor: "divider",
                     display: "grid",
                     gridTemplateColumns: "auto 1fr",
-                    gap: 1,
-                    columnGap: 2,
+                    gap: compact ? 0.5 : 1,
+                    columnGap: compact ? 1 : 2,
                     alignItems: "start",
                   }}
                 >
@@ -197,10 +244,11 @@ export function FunctionCallDisplay({
                         key={`${i}-name`}
                         sx={{
                           fontFamily: "monospace",
-                          fontSize: "0.875rem",
+                          fontSize: compact ? "0.7rem" : "0.875rem",
                           fontWeight: "medium",
                           color: accentColor,
-                          whiteSpace: "nowrap",
+                          whiteSpace: "normal",
+                          wordBreak: "break-word",
                         }}
                       >
                         {rv.name}:
@@ -209,7 +257,7 @@ export function FunctionCallDisplay({
                         key={`${i}-value`}
                         sx={{
                           fontFamily: "monospace",
-                          fontSize: "0.8125rem",
+                          fontSize: compact ? "0.7rem" : "0.8125rem",
                           wordBreak: "break-all",
                         }}
                       >
@@ -222,13 +270,13 @@ export function FunctionCallDisplay({
             )}
 
             {/* Call Details */}
-            <Box sx={{ mb: 2 }}>
-              <Typography variant="caption" color="text.secondary">
+            <Box sx={{ mb: compact ? 1 : 2 }}>
+              <Typography variant="caption" color="text.secondary" sx={{ fontSize: compact ? "0.65rem" : undefined }}>
                 Contract:
               </Typography>
               <Typography
                 variant="body2"
-                sx={{ fontFamily: "monospace", wordBreak: "break-all" }}
+                sx={{ fontFamily: "monospace", wordBreak: "break-all", fontSize: compact ? "0.7rem" : undefined }}
               >
                 {contractName}
               </Typography>
@@ -239,6 +287,7 @@ export function FunctionCallDisplay({
                   wordBreak: "break-all",
                   color: "text.secondary",
                   display: "block",
+                  fontSize: compact ? "0.65rem" : undefined,
                 }}
               >
                 {contractAddress}
@@ -246,13 +295,13 @@ export function FunctionCallDisplay({
             </Box>
 
             {callerName && (
-              <Box sx={{ mb: 2 }}>
-                <Typography variant="caption" color="text.secondary">
+              <Box sx={{ mb: compact ? 1 : 2 }}>
+                <Typography variant="caption" color="text.secondary" sx={{ fontSize: compact ? "0.65rem" : undefined }}>
                   Caller:
                 </Typography>
                 <Typography
                   variant="body2"
-                  sx={{ fontFamily: "monospace", wordBreak: "break-all" }}
+                  sx={{ fontFamily: "monospace", wordBreak: "break-all", fontSize: compact ? "0.7rem" : undefined }}
                 >
                   {callerName}
                 </Typography>

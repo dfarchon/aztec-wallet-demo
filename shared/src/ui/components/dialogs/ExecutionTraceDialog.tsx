@@ -6,22 +6,18 @@ import Button from "@mui/material/Button";
 import IconButton from "@mui/material/IconButton";
 import CloseIcon from "@mui/icons-material/Close";
 import Alert from "@mui/material/Alert";
+import { useTheme } from "@mui/material/styles";
+import useMediaQuery from "@mui/material/useMediaQuery";
 import { AztecAddress } from "@aztec/stdlib/aztec-address";
 import { ExecutionTraceDisplay } from "../shared/ExecutionTraceDisplay";
 import type { DecodedExecutionTrace } from "../../../wallet/decoding/tx-callstack-decoder";
-import type {
-  SimulationStats,
-  ProvingStats,
-  StoredPhaseTimings,
-} from "../shared/PhaseTimeline";
+import type { ExecutionStats } from "../shared/PhaseTimeline";
 
 interface ExecutionTraceDialogProps {
   open: boolean;
   onClose: () => void;
   trace: DecodedExecutionTrace | null;
-  stats?: SimulationStats;
-  provingStats?: ProvingStats;
-  phaseTimings?: StoredPhaseTimings;
+  stats?: ExecutionStats;
   from?: string | null;
   embeddedPaymentMethodFeePayer?: string | null;
 }
@@ -31,11 +27,12 @@ export function ExecutionTraceDialog({
   onClose,
   trace,
   stats,
-  provingStats,
-  phaseTimings,
   from,
   embeddedPaymentMethodFeePayer,
 }: ExecutionTraceDialogProps) {
+  const theme = useTheme();
+  const isSmall = useMediaQuery(theme.breakpoints.down("md"));
+
   if (!trace) return null;
 
   const isFromZero = from && AztecAddress.fromString(from).equals(AztecAddress.ZERO);
@@ -45,12 +42,11 @@ export function ExecutionTraceDialog({
     <Dialog
       open={open}
       onClose={onClose}
+      fullScreen={isSmall}
       maxWidth="md"
       fullWidth
       PaperProps={{
-        sx: {
-          maxHeight: "80vh",
-        },
+        sx: isSmall ? undefined : { maxHeight: "80vh" },
       }}
     >
       <DialogTitle
@@ -58,27 +54,27 @@ export function ExecutionTraceDialog({
           display: "flex",
           justifyContent: "space-between",
           alignItems: "center",
+          py: 1,
+          px: { xs: 1.5, sm: 3 },
         }}
       >
         Execution Trace
         <IconButton
           aria-label="close"
           onClick={onClose}
-          sx={{
-            color: (theme) => theme.palette.grey[500],
-          }}
+          sx={{ color: (t) => t.palette.grey[500] }}
         >
           <CloseIcon />
         </IconButton>
       </DialogTitle>
-      <DialogContent dividers>
+      <DialogContent dividers sx={{ px: { xs: 1, sm: 3 }, overflow: "hidden auto", minWidth: 0 }}>
         {isFromZero && (
-          <Alert severity="info" sx={{ mb: 2 }}>
+          <Alert severity="info" sx={{ mb: 1 }}>
             This request uses the MulticallEntrypoint and does not execute from any of your accounts.
           </Alert>
         )}
         {hasEmbeddedFeePayer && (
-          <Alert severity="success" sx={{ mb: 2 }}>
+          <Alert severity="success" sx={{ mb: 1 }}>
             The app is providing the fee payment method for this transaction.
           </Alert>
         )}
@@ -86,11 +82,10 @@ export function ExecutionTraceDialog({
           trace={trace}
           accordionBgColor="background.default"
           stats={stats}
-          provingStats={provingStats}
-          phaseTimings={phaseTimings}
+          compact={isSmall}
         />
       </DialogContent>
-      <DialogActions>
+      <DialogActions sx={{ px: { xs: 1.5, sm: 3 }, py: 1 }}>
         <Button onClick={onClose}>Close</Button>
       </DialogActions>
     </Dialog>

@@ -375,6 +375,7 @@ app.on("ready", async () => {
     "resolveAuthorization",
     "listAuthorizedApps",
     "getAppCapabilities",
+    "getAppRequestedManifest",
     "capabilityToStorageKeys",
     "storeCapabilityGrants",
     "updateAccountAuthorization",

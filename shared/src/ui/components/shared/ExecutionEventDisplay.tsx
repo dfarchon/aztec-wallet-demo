@@ -9,12 +9,14 @@ export interface ExecutionEventDisplayProps {
   event: ExecutionEvent;
   authorizations?: ReadableCallAuthorization[];
   accordionBgColor?: string;
+  compact?: boolean;
 }
 
 export function ExecutionEventDisplay({
   event,
   authorizations,
   accordionBgColor,
+  compact = false,
 }: ExecutionEventDisplayProps) {
   if (event.type === "private-call") {
     return (
@@ -22,6 +24,7 @@ export function ExecutionEventDisplay({
         call={event}
         authorizations={authorizations}
         accordionBgColor={accordionBgColor}
+        compact={compact}
       />
     );
   } else {
@@ -29,6 +32,7 @@ export function ExecutionEventDisplay({
       <PublicCallDisplay
         call={event}
         accordionBgColor={accordionBgColor}
+        compact={compact}
       />
     );
   }

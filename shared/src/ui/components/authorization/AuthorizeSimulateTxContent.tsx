@@ -10,12 +10,14 @@ import { ExecutionTraceDisplay } from "../shared/ExecutionTraceDisplay";
 interface AuthorizeSimulateTxContentProps {
   request: AuthorizationItem;
   showAppId?: boolean;
+  compact?: boolean;
 }
 
 // Content component for displaying simulateTx authorization details
 export function AuthorizeSimulateTxContent({
   request,
   showAppId = true,
+  compact,
 }: AuthorizeSimulateTxContentProps) {
   const params = request.params as {
     payloadHash?: string;
@@ -67,6 +69,7 @@ export function AuthorizeSimulateTxContent({
             trace={executionTrace}
             callAuthorizations={callAuthorizations}
             stats={stats}
+            compact={compact}
           />
         </Box>
       )}

@@ -26,13 +26,6 @@ export const AccountTypes = [
 ] as const;
 export type AccountType = (typeof AccountTypes)[number];
 
-/** Phase timings stored with transaction metadata */
-export interface StoredPhaseTimings {
-  simulation?: number;
-  proving?: number;
-  sending?: number;
-  mining?: number;
-}
 
 /** Per-function timing from simulation/proving */
 interface FunctionTiming {
@@ -46,13 +39,18 @@ interface StatsTimings {
   sync?: number;
   publicSimulation?: number;
   validation?: number;
+  proving?: number;
   perFunction: FunctionTiming[];
   unaccounted: number;
   total: number;
+  // Wall-clock phases injected at origin for sendTx
+  simulation?: number;
+  sending?: number;
+  mining?: number;
 }
 
-/** Proving stats from TxProvingResult */
-export interface ProvingStats {
+/** Execution stats stored per interaction (enriched with wall-clock phases at origin) */
+export interface StoredStats {
   timings: StatsTimings;
 }
 
@@ -322,19 +320,20 @@ export class WalletDB {
   async storeCapabilityGrants(
     appId: string,
     granted: GrantedCapability[],
+    requestedManifest?: AppCapabilities,
   ): Promise<void> {
     this.logger.info(
       `[storeCapabilityGrants] Called for ${appId} with ${granted.length} capabilities`,
     );
 
-    // First, clear all existing authorizations for this app (except __behavior__)
+    // First, clear all existing authorizations for this app (except __behavior__ and __manifest__)
     // This ensures removed capabilities are actually removed
     const keysToDelete: string[] = [];
     for await (const [key, _] of this.authorizations.entriesAsync()) {
       if (key.startsWith(`${appId}:`)) {
         const storageKey = key.substring(appId.length + 1);
-        // Preserve the behavior metadata
-        if (storageKey !== "__behavior__") {
+        // Preserve the behavior and manifest metadata
+        if (storageKey !== "__behavior__" && storageKey !== "__manifest__") {
           keysToDelete.push(key);
         }
       }
@@ -377,6 +376,39 @@ export class WalletDB {
     this.logger.info(
       `Stored capability grants for ${appId}: ${granted.length} capabilities, ${allKeys.length} storage keys: ${allKeys.join(", ")}`,
     );
+
+    // Persist the original requested manifest so the Apps tab can show all capabilities
+    // (including ones the user denied) for later editing
+    if (requestedManifest) {
+      await this.storeRequestedManifest(appId, requestedManifest);
+    }
+  }
+
+  /**
+   * Store the app's original requested manifest.
+   * Preserves the full capability list even if the user denied some capabilities.
+   */
+  async storeRequestedManifest(
+    appId: string,
+    manifest: AppCapabilities,
+  ): Promise<void> {
+    const key = `${appId}:__manifest__`;
+    await this.authorizations.set(
+      key,
+      Buffer.from(jsonStringify(manifest)),
+    );
+  }
+
+  /**
+   * Retrieve the app's original requested manifest, if stored.
+   */
+  async getRequestedManifest(
+    appId: string,
+  ): Promise<AppCapabilities | undefined> {
+    const key = `${appId}:__manifest__`;
+    const raw = await this.authorizations.getAsync(key);
+    if (!raw) return undefined;
+    return JSON.parse(Buffer.from(raw).toString()) as AppCapabilities;
   }
 
   /**
@@ -581,8 +613,8 @@ export class WalletDB {
     for await (const [key, _] of this.authorizations.entriesAsync()) {
       if (key.startsWith(`${appId}:`)) {
         const storageKey = key.substring(appId.length + 1); // Remove "appId:" prefix
-        // Skip behavior metadata
-        if (storageKey !== "__behavior__") {
+        // Skip internal metadata keys
+        if (storageKey !== "__behavior__" && storageKey !== "__manifest__") {
           keys.push(storageKey);
         }
       }
@@ -871,8 +903,7 @@ export class WalletDB {
     metadata?: {
       from?: string;
       embeddedPaymentMethodFeePayer?: string;
-      phaseTimings?: StoredPhaseTimings;
-      provingStats?: ProvingStats;
+      stats?: StoredStats;
     },
   ) {
     const data = jsonStringify({
@@ -891,8 +922,7 @@ export class WalletDB {
         metadata?: {
           from?: string;
           embeddedPaymentMethodFeePayer?: string;
-          phaseTimings?: StoredPhaseTimings;
-          provingStats?: ProvingStats;
+          stats?: StoredStats;
         };
       }
     | undefined
@@ -905,13 +935,12 @@ export class WalletDB {
   }
 
   /**
-   * Update phase timings and proving stats for an existing tx simulation.
-   * Used to add proving stats and timing data after execution completes.
+   * Store enriched proving stats for a completed tx.
+   * The stats object carries all timing data (simulation, proving, sending, mining).
    */
-  async updateTxSimulationWithProvingData(
+  async updateTxSimulationWithStats(
     payloadHash: string,
-    phaseTimings: StoredPhaseTimings,
-    provingStats?: ProvingStats,
+    stats: StoredStats,
   ): Promise<void> {
     const existing = await this.getTxSimulation(payloadHash);
     if (!existing) {
@@ -922,20 +951,14 @@ export class WalletDB {
     }
 
     const metadata = existing.metadata || {};
-    metadata.phaseTimings = {
-      ...metadata.phaseTimings,
-      ...phaseTimings,
-    };
-    if (provingStats) {
-      metadata.provingStats = provingStats;
-    }
+    metadata.stats = stats;
 
     const data = jsonStringify({
       ...existing,
       metadata,
     });
     await this.txSimulations.set(payloadHash, data);
-    this.logger.debug(`Phase timings updated for payload hash ${payloadHash}`);
+    this.logger.debug(`Proving stats updated for payload hash ${payloadHash}`);
   }
 
   async storeUtilityTrace(payloadHash: string, trace: any, stats?: any) {
@@ -955,7 +978,6 @@ export class WalletDB {
       return undefined;
     }
     const parsed = JSON.parse(result);
-    // Only return if this is actually a utility trace (not a tx simulation)
     if (!parsed.utilityTrace) {
       return undefined;
     }

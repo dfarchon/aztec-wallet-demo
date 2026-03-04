@@ -25,12 +25,14 @@ export interface PrivateCallDisplayProps {
   call: PrivateCallEvent;
   authorizations?: ReadableCallAuthorization[];
   accordionBgColor?: string;
+  compact?: boolean;
 }
 
 export function PrivateCallDisplay({
   call,
   authorizations,
   accordionBgColor,
+  compact = false,
 }: PrivateCallDisplayProps) {
   const hasNestedEvents = call.nestedEvents.length > 0;
   const needsAuth = requiresAuthorization(call, authorizations);
@@ -48,15 +50,17 @@ export function PrivateCallDisplay({
       isStaticCall={call.isStaticCall}
       needsAuth={needsAuth}
       accordionBgColor={accordionBgColor}
+      compact={compact}
       nestedContent={
         hasNestedEvents ? (
-          <Box sx={{ mt: 1 }}>
+          <Box sx={{ mt: compact ? 0.5 : 1 }}>
             {call.nestedEvents.map((event, i) => (
               <ExecutionEventDisplay
                 key={i}
                 event={event}
                 authorizations={authorizations}
                 accordionBgColor={accordionBgColor}
+                compact={compact}
               />
             ))}
           </Box>

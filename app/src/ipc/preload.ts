@@ -38,6 +38,9 @@ contextBridge.exposeInMainWorld("walletAPI", {
   getAppCapabilities(stringifiedArgs: string): Promise<any[]> {
     return ipcRenderer.invoke("getAppCapabilities", stringifiedArgs);
   },
+  getAppRequestedManifest(stringifiedArgs: string): Promise<any> {
+    return ipcRenderer.invoke("getAppRequestedManifest", stringifiedArgs);
+  },
   capabilityToStorageKeys(stringifiedArgs: string): Promise<string[]> {
     return ipcRenderer.invoke("capabilityToStorageKeys", stringifiedArgs);
   },

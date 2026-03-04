@@ -325,7 +325,7 @@ export class SendTxOperation<
     }
 
     // Extract proving stats from the result
-    const provingStats = provenTx.stats;
+    const rawStats = provenTx.stats;
 
     const tx = await provenTx.toTx();
     const txHash = tx.getTxHash();
@@ -353,8 +353,8 @@ export class SendTxOperation<
       return `${(ms / 1000).toFixed(1)}s`;
     };
 
-    const provingTime = provingStats.timings.proving;
-    const witgenTime = provingStats.timings.perFunction.reduce(
+    const provingTime = rawStats.timings.proving;
+    const witgenTime = rawStats.timings.perFunction.reduce(
       (acc, fn) => acc + fn.time,
       0,
     );
@@ -363,20 +363,13 @@ export class SendTxOperation<
     if (executionData.wait === NO_WAIT) {
       const timingSummary = `Witgen: ${formatDuration(witgenTime)} | Prove: ${formatDuration(provingTime)} | Send: ${formatDuration(sendingTime)}`;
       await this.emitProgress("SENT", timingSummary, true);
-      // Store phase timings and proving stats (no mining time since we didn't wait)
-      await this.db.updateTxSimulationWithProvingData(
-        executionData.payloadHash,
-        {
-          simulation: executionData.simulationTime,
-          proving: provingStats.timings.proving,
-          sending: sendingTime,
-        },
-        provingStats,
-      );
+      const enrichedStats = { ...rawStats, timings: { ...rawStats.timings, simulation: executionData.simulationTime, sending: sendingTime } };
+      await this.db.updateTxSimulationWithStats(executionData.payloadHash, enrichedStats);
       return txHash as SendTxResult<W>;
     }
 
     // Otherwise, wait for the full receipt (default behavior on wait: undefined)
+    await this.emitProgress("MINING", `TxHash: ${txHash.toString()}`);
     const miningStartTime = Date.now();
     const waitOpts =
       typeof executionData.wait === "object" ? executionData.wait : undefined;
@@ -386,17 +379,8 @@ export class SendTxOperation<
     const timingSummary = `Witgen: ${formatDuration(witgenTime)} | Prove: ${formatDuration(provingTime)} | Send: ${formatDuration(sendingTime)} | Mine: ${formatDuration(miningTime)}`;
     await this.emitProgress("SENT", timingSummary, true);
 
-    // Store all phase timings including mining and proving stats
-    await this.db.updateTxSimulationWithProvingData(
-      executionData.payloadHash,
-      {
-        simulation: executionData.simulationTime,
-        proving: provingTime,
-        sending: sendingTime,
-        mining: miningTime,
-      },
-      provingStats,
-    );
+    const enrichedStats = { ...rawStats, timings: { ...rawStats.timings, simulation: executionData.simulationTime, sending: sendingTime, mining: miningTime } };
+    await this.db.updateTxSimulationWithStats(executionData.payloadHash, enrichedStats);
 
     return receipt as SendTxResult<W>;
   }

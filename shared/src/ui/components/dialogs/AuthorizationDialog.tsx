@@ -13,7 +13,8 @@ import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import Checkbox from "@mui/material/Checkbox";
 import Chip from "@mui/material/Chip";
 import Card from "@mui/material/Card";
-import { Apps as AppsIcon, AccountCircle } from "@mui/icons-material";
+import { Apps as AppsIcon, AccountCircle, Close as CloseIcon } from "@mui/icons-material";
+import IconButton from "@mui/material/IconButton";
 import type {
   AuthorizationRequest,
   AuthorizationItemResponse,
@@ -32,6 +33,8 @@ import { AuthorizeContractClassMetadataContent } from "../authorization/Authoriz
 import { AuthorizeCapabilitiesContent } from "../authorization/AuthorizeCapabilitiesContent";
 import { WalletContext } from "../../renderer";
 import { AztecAddress } from "@aztec/aztec.js/addresses";
+import { useTheme } from "@mui/material/styles";
+import useMediaQuery from "@mui/material/useMediaQuery";
 
 interface AuthorizationDialogProps {
   request: AuthorizationRequest;
@@ -165,6 +168,8 @@ export function AuthorizationDialog({
   onDeny,
   queueLength = 1,
 }: AuthorizationDialogProps) {
+  const theme = useTheme();
+  const isSmall = useMediaQuery(theme.breakpoints.down("md"));
   const { walletAPI } = useContext(WalletContext);
   const items = request.items;
   const [accountList, setAccountList] = useState<
@@ -281,8 +286,8 @@ export function AuthorizationDialog({
   ).length;
 
   return (
-    <Dialog open={true} maxWidth="lg" fullWidth>
-      <DialogTitle>
+    <Dialog open={true} fullScreen={isSmall} maxWidth="md" fullWidth>
+      <DialogTitle sx={{ py: 1, px: { xs: 1.5, sm: 3 } }}>
         <Box
           sx={{
             display: "flex",
@@ -290,25 +295,36 @@ export function AuthorizationDialog({
             justifyContent: "space-between",
           }}
         >
-          <span>Authorization Request</span>
-          {queueLength > 1 && (
-            <Typography
-              variant="caption"
-              sx={{
-                bgcolor: "primary.main",
-                color: "primary.contrastText",
-                px: 1.5,
-                py: 0.5,
-                borderRadius: 1,
-                fontWeight: "bold",
-              }}
+          <Typography variant="subtitle1" fontWeight="bold">Authorization Request</Typography>
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+            {queueLength > 1 && (
+              <Typography
+                variant="caption"
+                sx={{
+                  bgcolor: "primary.main",
+                  color: "primary.contrastText",
+                  px: 1.5,
+                  py: 0.5,
+                  borderRadius: 1,
+                  fontWeight: "bold",
+                }}
+              >
+                {queueLength} pending
+              </Typography>
+            )}
+            <IconButton
+              edge="end"
+              color="inherit"
+              onClick={onDeny}
+              aria-label="close"
+              size="small"
             >
-              {queueLength} pending
-            </Typography>
-          )}
+              <CloseIcon />
+            </IconButton>
+          </Box>
         </Box>
       </DialogTitle>
-      <DialogContent>
+      <DialogContent sx={{ px: { xs: 1.5, sm: 3 }, pt: 1 }}>
         <Typography variant="body1" gutterBottom>
           App <strong>{request.appId}</strong> is requesting to perform{" "}
           {items.length} operation{items.length > 1 ? "s" : ""}:
@@ -359,8 +375,8 @@ export function AuthorizationDialog({
                   </Box>
                 </AccordionSummary>
 
-                <AccordionDetails>
-                  <Box sx={{ pl: 5 }}>
+                <AccordionDetails sx={{ px: { xs: 1, sm: 2 }, pt: 1 }}>
+                  <Box>
                     {/* Prominent info card for sendTx and simulateTx */}
                     {(item.method === "sendTx" ||
                       item.method === "simulateTx") &&
@@ -373,12 +389,12 @@ export function AuthorizationDialog({
                             borderColor: "primary.main",
                           }}
                         >
-                          <Box sx={{ p: 2 }}>
+                          <Box sx={{ p: { xs: 1, sm: 2 } }}>
                             <Box
                               sx={{
                                 display: "flex",
                                 flexDirection: "column",
-                                gap: 1.5,
+                                gap: 1,
                               }}
                             >
                               {/* App Info */}
@@ -468,6 +484,7 @@ export function AuthorizationDialog({
                       <AuthorizeSendTxContent
                         request={item}
                         showAppId={false}
+                        compact={isSmall}
                       />
                     )}
 
@@ -476,6 +493,7 @@ export function AuthorizationDialog({
                       <AuthorizeSimulateTxContent
                         request={item}
                         showAppId={false}
+                        compact={isSmall}
                       />
                     )}
 
@@ -563,7 +581,7 @@ export function AuthorizationDialog({
         </Typography>
       </DialogContent>
 
-      <DialogActions>
+      <DialogActions sx={{ px: { xs: 1.5, sm: 3 }, py: 1.5 }}>
         <Button onClick={onDeny} color="error">
           Deny All
         </Button>

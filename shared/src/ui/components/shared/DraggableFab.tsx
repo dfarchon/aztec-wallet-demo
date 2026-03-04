@@ -3,8 +3,6 @@ import Fab from "@mui/material/Fab";
 import AddIcon from "@mui/icons-material/Add";
 import DragIndicatorIcon from "@mui/icons-material/DragIndicator";
 
-const INTERACTIONS_PANEL_WIDTH = 400;
-
 interface DraggableFabProps {
   onClick: () => void;
   icon?: ReactNode;
@@ -14,7 +12,7 @@ interface DraggableFabProps {
 export function DraggableFab({ onClick, icon = <AddIcon />, color = "primary" }: DraggableFabProps) {
   const [fabPosition, setFabPosition] = useState({
     bottom: 16,
-    right: INTERACTIONS_PANEL_WIDTH + 16,
+    right: 16,
   });
   const [isDragging, setIsDragging] = useState(false);
   const [hasDragged, setHasDragged] = useState(false);
@@ -76,7 +74,7 @@ export function DraggableFab({ onClick, icon = <AddIcon />, color = "primary" }:
     <Fab
       color={color}
       sx={{
-        position: "absolute",
+        position: "fixed",
         bottom: fabPosition.bottom,
         right: fabPosition.right,
         cursor: isDragging && hasDragged ? "grabbing" : "pointer",

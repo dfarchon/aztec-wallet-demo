@@ -432,10 +432,12 @@ export class RequestCapabilitiesOperation extends ExternalOperation<
       throw new Error("No capabilities were granted during authorization");
     }
 
-    // Translate granted capabilities to persistent authorization storage keys
+    // Translate granted capabilities to persistent authorization storage keys.
+    // Pass the original manifest so the Apps tab can show all capabilities for later editing.
     await this.db.storeCapabilityGrants(
       this.authorizationManager.appId,
       this.grantedCapabilities,
+      executionData.manifest,
     );
 
     await this.emitProgress("SUCCESS", undefined, true);

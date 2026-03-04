@@ -1,4 +1,4 @@
-import { useContext, useState } from "react";
+import { useContext, useEffect, useState, type MutableRefObject } from "react";
 import {
   Box,
   Card,
@@ -24,17 +24,17 @@ import type {
 } from "../../../../wallet/types/wallet-interaction";
 import { ExecutionTraceDialog } from "../../dialogs/ExecutionTraceDialog";
 import type { DecodedExecutionTrace } from "../../../../wallet/decoding/tx-callstack-decoder";
-import type {
-  SimulationStats,
-  ProvingStats,
-  StoredPhaseTimings,
-} from "../../shared/PhaseTimeline";
+import type { ExecutionStats } from "../../shared/PhaseTimeline";
+import { TxProgressTimeline } from "../../shared/TxProgressTimeline";
 import { WalletContext } from "../../../renderer";
+
+const TX_TYPES: WalletInteractionType[] = ["sendTx", "simulateTx", "simulateUtility"];
 
 interface InteractionsListProps {
   interactions: WalletInteraction<WalletInteractionType>[];
   selectedTypes: WalletInteractionType[];
   onTypeFilterChange: (types: WalletInteractionType[]) => void;
+  phaseStartsRef: MutableRefObject<Map<string, number>>;
 }
 
 const getStatusColor = (status: string, complete: boolean) => {
@@ -136,16 +136,65 @@ export function InteractionsList({
   interactions,
   selectedTypes,
   onTypeFilterChange,
+  phaseStartsRef,
 }: InteractionsListProps) {
   const { walletAPI } = useContext(WalletContext);
   const [selectedTrace, setSelectedTrace] =
     useState<DecodedExecutionTrace | null>(null);
-  const [selectedStats, setSelectedStats] = useState<SimulationStats | null>(null);
-  const [selectedProvingStats, setSelectedProvingStats] = useState<ProvingStats | null>(null);
-  const [selectedPhaseTimings, setSelectedPhaseTimings] = useState<StoredPhaseTimings | null>(null);
+  const [selectedStats, setSelectedStats] = useState<ExecutionStats | null>(null);
   const [selectedFrom, setSelectedFrom] = useState<string | null>(null);
   const [selectedFeePayer, setSelectedFeePayer] = useState<string | null>(null);
   const [traceDialogOpen, setTraceDialogOpen] = useState(false);
+
+  // Lazy-loaded stats for completed tx interactions (for the inline timeline)
+  const [completedTimings, setCompletedTimings] = useState<
+    Map<string, { stats?: ExecutionStats }>
+  >(new Map());
+
+  // Evict completed timings for interactions that are running again (same id, re-run).
+  useEffect(() => {
+    const rerunIds = interactions
+      .filter((i) => !i.complete && TX_TYPES.includes(i.type) && completedTimings.has(i.id))
+      .map((i) => i.id);
+    if (rerunIds.length === 0) return;
+    setCompletedTimings((prev) => {
+      const next = new Map(prev);
+      for (const id of rerunIds) next.delete(id);
+      return next;
+    });
+  }, [interactions]);
+
+  // Load phase timings for completed tx interactions.
+  // Guard: don't fire while any TX interaction is still active — concurrent PXE DB
+  // reads (via decodeTransaction → decodingCache) can corrupt in-flight IDB transactions.
+  useEffect(() => {
+    const hasActiveTx = interactions.some(
+      (i) => !i.complete && TX_TYPES.includes(i.type)
+    );
+    if (hasActiveTx) return;
+
+    const completedTxInteractions = interactions.filter(
+      (i) => i.complete && TX_TYPES.includes(i.type) && !completedTimings.has(i.id)
+    );
+    if (completedTxInteractions.length === 0) return;
+
+    for (const interaction of completedTxInteractions) {
+      walletAPI.getExecutionTrace(interaction.id).then((result) => {
+        setCompletedTimings((prev) => {
+          const next = new Map(prev);
+          next.set(interaction.id, { stats: result?.stats as ExecutionStats | undefined });
+          return next;
+        });
+      }).catch(() => {
+        // Mark as attempted so we don't retry
+        setCompletedTimings((prev) => {
+          const next = new Map(prev);
+          next.set(interaction.id, {});
+          return next;
+        });
+      });
+    }
+  }, [interactions]);
 
   const handleInteractionClick = async (
     interaction: WalletInteraction<WalletInteractionType>
@@ -160,9 +209,7 @@ export function InteractionsList({
         const result = await walletAPI.getExecutionTrace(interaction.id);
         if (result?.trace) {
           setSelectedTrace(result.trace);
-          setSelectedStats(result.stats as SimulationStats);
-          setSelectedProvingStats((result.provingStats as ProvingStats) || null);
-          setSelectedPhaseTimings(result.phaseTimings || null);
+          setSelectedStats(result.stats as ExecutionStats);
           setSelectedFrom(result.from || null);
           setSelectedFeePayer(result.embeddedPaymentMethodFeePayer || null);
           setTraceDialogOpen(true);
@@ -332,6 +379,14 @@ export function InteractionsList({
                     >
                       ID: {interaction.id.slice(0, 16)}...
                     </Typography>
+                    {TX_TYPES.includes(interaction.type) && (
+                      <TxProgressTimeline
+                        interaction={interaction}
+                        phaseStartsRef={phaseStartsRef}
+                        timingsLoaded={completedTimings.has(interaction.id)}
+                        stats={completedTimings.get(interaction.id)?.stats}
+                      />
+                    )}
                   </CardContent>
                 </Card>
               </ListItem>
@@ -375,8 +430,6 @@ export function InteractionsList({
         onClose={() => setTraceDialogOpen(false)}
         trace={selectedTrace}
         stats={selectedStats}
-        provingStats={selectedProvingStats || undefined}
-        phaseTimings={selectedPhaseTimings || undefined}
         from={selectedFrom}
         embeddedPaymentMethodFeePayer={selectedFeePayer}
       />

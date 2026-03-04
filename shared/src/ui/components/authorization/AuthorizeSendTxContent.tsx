@@ -10,12 +10,14 @@ import { ExecutionTraceDisplay } from "../shared/ExecutionTraceDisplay";
 interface AuthorizeSendTxContentProps {
   request: AuthorizationItem;
   showAppId?: boolean;
+  compact?: boolean;
 }
 
 // Reusable content component for displaying sendTx authorization details
 export function AuthorizeSendTxContent({
   request,
   showAppId = true,
+  compact,
 }: AuthorizeSendTxContentProps) {
   const params = request.params as {
     callAuthorizations?: ReadableCallAuthorization[];
@@ -59,6 +61,7 @@ export function AuthorizeSendTxContent({
           trace={executionTrace}
           callAuthorizations={callAuthorizations}
           stats={stats}
+          compact={compact}
         />
       )}
 

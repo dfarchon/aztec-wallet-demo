@@ -4,10 +4,8 @@ import { FunctionCallDisplay } from "./FunctionCallDisplay";
 import { PrivateCallDisplay } from "./PrivateCallDisplay";
 import { PublicCallDisplay } from "./PublicCallDisplay";
 import {
-  TransactionPhaseTimeline,
-  type SimulationStats,
-  type ProvingStats,
-  type StoredPhaseTimings,
+  SimulationPhaseTimeline,
+  type ExecutionStats,
 } from "./PhaseTimeline";
 import { AztecAddress } from "@aztec/stdlib/aztec-address";
 import Box from "@mui/material/Box";
@@ -38,17 +36,17 @@ interface ExecutionTraceDisplayProps {
   trace: DecodedExecutionTrace | UtilityExecutionTrace;
   callAuthorizations?: ReadableCallAuthorization[];
   accordionBgColor?: string;
-  stats?: SimulationStats;
-  provingStats?: ProvingStats;
-  phaseTimings?: StoredPhaseTimings;
+  stats?: ExecutionStats;
+  compact?: boolean;
 }
 
-interface SimulationStatsDisplayProps {
-  stats: SimulationStats;
+interface ExecutionStatsDisplayProps {
+  stats: ExecutionStats;
   trace: DecodedExecutionTrace | UtilityExecutionTrace;
+  compact?: boolean;
 }
 
-function SimulationStatsDisplay({ stats }: SimulationStatsDisplayProps) {
+function ExecutionStatsDisplay({ stats, compact }: ExecutionStatsDisplayProps) {
   const formatTime = (ms: number) => {
     if (ms < 1000) return `${ms.toFixed(0)}ms`;
     return `${(ms / 1000).toFixed(2)}s`;
@@ -57,6 +55,19 @@ function SimulationStatsDisplay({ stats }: SimulationStatsDisplayProps) {
   // Only show if there are round trips to display
   if (!stats?.nodeRPCCalls?.roundTrips?.roundTripDurations?.length) {
     return null;
+  }
+
+  const totalRpcTime = stats.nodeRPCCalls.roundTrips.roundTripDurations.reduce(
+    (sum, d) => sum + d, 0,
+  );
+  const tripCount = stats.nodeRPCCalls.roundTrips.roundTripDurations.length;
+
+  if (compact) {
+    return (
+      <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1 }}>
+        {tripCount} RPC round trip{tripCount !== 1 ? "s" : ""} · {formatTime(totalRpcTime)} total
+      </Typography>
+    );
   }
 
   return (
@@ -77,8 +88,7 @@ function SimulationStatsDisplay({ stats }: SimulationStatsDisplayProps) {
           variant="subtitle2"
           sx={{ fontWeight: 600, color: "text.secondary" }}
         >
-          RPC Round Trips (
-          {stats.nodeRPCCalls.roundTrips.roundTripDurations.length})
+          RPC Round Trips ({tripCount})
         </Typography>
       </AccordionSummary>
       <AccordionDetails sx={{ pt: 1, pb: 2 }}>
@@ -130,8 +140,7 @@ export function ExecutionTraceDisplay({
   callAuthorizations,
   accordionBgColor,
   stats,
-  provingStats,
-  phaseTimings,
+  compact = false,
 }: ExecutionTraceDisplayProps) {
   // Check if this is a utility trace
   if ("isUtility" in trace && trace.isUtility) {
@@ -147,8 +156,8 @@ export function ExecutionTraceDisplay({
       <>
         {/* Phase timeline for utility simulations */}
         {stats && (
-          <Box sx={{ mb: 2 }}>
-            <TransactionPhaseTimeline simulationStats={stats} size="normal" />
+          <Box sx={{ mb: compact ? 1 : 2 }}>
+            <SimulationPhaseTimeline stats={stats} size={compact ? "compact" : "normal"} />
           </Box>
         )}
         <FunctionCallDisplay
@@ -159,8 +168,9 @@ export function ExecutionTraceDisplay({
           returnValues={returnValues}
           typeLabel="Utility"
           accordionBgColor={accordionBgColor}
+          compact={compact}
         />
-        {stats && <SimulationStatsDisplay stats={stats} trace={trace} />}
+        {stats && <ExecutionStatsDisplay stats={stats} trace={trace} compact={compact} />}
       </>
     );
   }
@@ -177,14 +187,9 @@ export function ExecutionTraceDisplay({
   return (
     <>
       {/* Phase timeline showing simulation, proving, sending, mining times */}
-      {(phaseTimings || stats || provingStats) && (
-        <Box sx={{ mb: 2 }}>
-          <TransactionPhaseTimeline
-            simulationStats={stats}
-            provingStats={provingStats}
-            phaseTimings={phaseTimings}
-            size="normal"
-          />
+      {stats && (
+        <Box sx={{ mb: compact ? 1 : 2 }}>
+          <SimulationPhaseTimeline stats={stats} size={compact ? "compact" : "normal"} />
         </Box>
       )}
 
@@ -195,6 +200,7 @@ export function ExecutionTraceDisplay({
           call={decodedTrace.privateExecution}
           authorizations={callAuthorizations}
           accordionBgColor={accordionBgColor}
+          compact={compact}
         />
       )}
 
@@ -205,10 +211,11 @@ export function ExecutionTraceDisplay({
             key={idx}
             call={publicCall}
             accordionBgColor={accordionBgColor}
+            compact={compact}
           />
         ))}
 
-      {stats && <SimulationStatsDisplay stats={stats} trace={trace} />}
+      {stats && <ExecutionStatsDisplay stats={stats} trace={trace} compact={compact} />}
     </>
   );
 }

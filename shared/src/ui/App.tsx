@@ -1,8 +1,10 @@
-import React, { useContext, useEffect, useState } from "react";
+import React, { useContext, useEffect, useRef, useState } from "react";
 import Box from "@mui/material/Box";
 import AppBar from "@mui/material/AppBar";
 import Toolbar from "@mui/material/Toolbar";
 import IconButton from "@mui/material/IconButton";
+import Chip from "@mui/material/Chip";
+import CircularProgress from "@mui/material/CircularProgress";
 import MenuIcon from "@mui/icons-material/Menu";
 import Typography from "@mui/material/Typography";
 import List from "@mui/material/List";
@@ -12,14 +14,17 @@ import ListItemText from "@mui/material/ListItemText";
 import AccountBalanceWalletIcon from "@mui/icons-material/AccountBalanceWallet";
 import ContactsIcon from "@mui/icons-material/Contacts";
 import AppsIcon from "@mui/icons-material/Apps";
+import { useTheme } from "@mui/material/styles";
+import useMediaQuery from "@mui/material/useMediaQuery";
 import { InteractionsList } from "./components/sections/interactions/index.tsx";
 import { AccountsManager } from "./components/sections/accounts/index.tsx";
 import { ContactsManager } from "./components/sections/contacts/index.tsx";
 import { AuthorizedApps } from "./components/sections/authorized-apps/index.tsx";
 import { AuthorizationDialog } from "./components/dialogs/AuthorizationDialog.tsx";
 import { ProofDebugExportDialog } from "./components/dialogs/ProofDebugExportDialog.tsx";
-import type { ProofDebugExportRequest } from "../wallet/types/wallet-interaction.ts";
 import { NetworkSelector } from "./components/NetworkSelector.tsx";
+import { TxProgressTimeline } from "./components/shared/TxProgressTimeline.tsx";
+import type { ProofDebugExportRequest } from "../wallet/types/wallet-interaction.ts";
 
 import type {
   WalletInteraction,
@@ -36,6 +41,7 @@ const MENU_DRAWER_WIDTH = 240;
 const SIDEBAR_WIDTH = 64;
 
 type MenuSection = "accounts" | "contacts" | "apps";
+type CompactTab = MenuSection | "interactions";
 
 export function App() {
   const [menuOpen, setMenuOpen] = useState(false);
@@ -44,6 +50,11 @@ export function App() {
     INTERACTIONS_PANEL_WIDTH
   );
   const [isResizing, setIsResizing] = useState(false);
+  const [compactTab, setCompactTab] = useState<CompactTab>("accounts");
+
+  // Track when each phase begins per interaction (interactionId:STATUS → timestamp)
+  const phaseStartsRef = useRef<Map<string, number>>(new Map());
+
 
   const [interactions, setInteractions] = useState<
     WalletInteraction<WalletInteractionType>[]
@@ -76,6 +87,12 @@ export function App() {
   const { walletAPI } = useContext(WalletContext);
   const { currentNetwork } = useNetwork();
 
+  // Responsive breakpoints — all hooks called unconditionally (Rules of Hooks)
+  const theme = useTheme();
+  const isSmallWidth = useMediaQuery(theme.breakpoints.down("md"));
+  const isSmallHeight = useMediaQuery("(max-height: 499.95px)");
+  const isCompact = isSmallWidth || isSmallHeight;
+
   const loadInteractions = async () => {
     const interactions = await walletAPI.getInteractions();
     setInteractions(interactions);
@@ -85,11 +102,27 @@ export function App() {
     // Clear state when network changes
     setInteractions([]);
     setAuthQueue([]);
+    setCompactTab("accounts");
+    phaseStartsRef.current.clear();
 
     loadInteractions();
     walletAPI.onWalletUpdate((interaction) => {
+      // Always record when each phase begins (overwrite on re-runs of same interaction id,
+      // e.g. recurring simulateUtility calls that share the same payloadHash as id).
+      const phaseKey = `${interaction.id}:${interaction.status}`;
+      phaseStartsRef.current.set(phaseKey, Date.now());
+      // MINING is the live mining phase — also store as SENT so the timeline
+      // can measure Sending duration (SENDING→SENT) and Mining elapsed (from SENT key).
+      if (interaction.status === "MINING") {
+        phaseStartsRef.current.set(`${interaction.id}:SENT`, Date.now());
+      }
+      // START uses interaction.timestamp (creation time) — only set once per id.
+      const startKey = `${interaction.id}:START`;
+      if (!phaseStartsRef.current.has(startKey)) {
+        phaseStartsRef.current.set(startKey, interaction.timestamp);
+      }
+
       setInteractions((prevEvents) => {
-        // Deduplicate by ID to prevent React strict mode duplicates
         const eventsMap = new Map<
           string,
           WalletInteraction<WalletInteractionType>
@@ -101,11 +134,9 @@ export function App() {
       });
     });
 
-    // Listen for authorization requests from external dApps
     walletAPI.onAuthorizationRequest((request: AuthorizationRequest) => {
       console.log("New authorization request:", request);
       setAuthQueue((prev) => {
-        // Deduplicate by ID to prevent React strict mode duplicates
         if (prev.some((req) => req.id === request.id)) {
           return prev;
         }
@@ -113,14 +144,13 @@ export function App() {
       });
     });
 
-    // Listen for proof debug export requests (on proving failure)
     walletAPI.onProofDebugExportRequest(
       (request: ProofDebugExportRequest & { debugData: string }) => {
         console.log("Proof debug export request:", request.id);
         setProofDebugExportRequest(request);
       }
     );
-  }, [currentNetwork.id, walletAPI]); // Reload when network changes
+  }, [currentNetwork.id, walletAPI]);
 
   const handleMenuToggle = () => {
     setMenuOpen(!menuOpen);
@@ -139,14 +169,12 @@ export function App() {
         appId: currentAuth.appId,
         itemResponses,
       });
-      // Remove the processed request from the queue
       setAuthQueue((prev) => prev.slice(1));
     }
   };
 
   const handleAuthDeny = () => {
     if (currentAuth) {
-      // Create denied responses for all items
       const itemResponses: Record<string, any> = {};
       for (const item of currentAuth.items) {
         itemResponses[item.id] = {
@@ -162,7 +190,6 @@ export function App() {
         appId: currentAuth.appId,
         itemResponses,
       });
-      // Remove the processed request from the queue
       setAuthQueue((prev) => prev.slice(1));
     }
   };
@@ -218,8 +245,8 @@ export function App() {
     };
   }, [isResizing]);
 
-  const renderContent = () => {
-    switch (currentSection) {
+  const renderSectionContent = (section: MenuSection) => {
+    switch (section) {
       case "accounts":
         return <AccountsManager />;
       case "contacts":
@@ -231,6 +258,166 @@ export function App() {
     }
   };
 
+  // Shared dialogs — rendered outside all layout branches
+  const dialogs = (
+    <>
+      {currentAuth && (
+        <AuthorizationDialog
+          request={currentAuth}
+          onApprove={handleAuthApprove}
+          onDeny={handleAuthDeny}
+          queueLength={authQueue.length}
+        />
+      )}
+      {proofDebugExportRequest && (
+        <ProofDebugExportDialog
+          request={proofDebugExportRequest}
+          onExport={handleProofDebugExport}
+          onCancel={handleProofDebugCancel}
+        />
+      )}
+    </>
+  );
+
+  // ── Compact layout (< 700px wide OR < 500px tall) ──────────────────────────
+  if (isCompact) {
+    return (
+      <Box sx={{ display: "flex", flexDirection: "column", height: "100%", width: "100%", overflow: "hidden" }}>
+        {/* Header row */}
+        <Box
+          sx={{
+            display: "flex",
+            alignItems: "center",
+            px: 1,
+            py: 0.5,
+            borderBottom: 1,
+            borderColor: "divider",
+            bgcolor: "background.paper",
+            gap: 1,
+            flexShrink: 0,
+          }}
+        >
+          <AccountBalanceWalletIcon fontSize="small" color="primary" />
+          <Typography variant="caption" fontWeight="bold" sx={{ flexGrow: 1 }}>
+            Aztec Keychain
+          </Typography>
+          <NetworkSelector />
+        </Box>
+
+        {/* Section tabs */}
+        <Box
+          sx={{
+            display: "flex",
+            borderBottom: 1,
+            borderColor: "divider",
+            bgcolor: "background.paper",
+            flexShrink: 0,
+          }}
+        >
+          {(["accounts", "contacts", "apps", "interactions"] as CompactTab[]).map((tab) => (
+            <Box
+              key={tab}
+              onClick={() => {
+                setCompactTab(tab);
+                if (tab !== "interactions") {
+                  setCurrentSection(tab as MenuSection);
+                }
+              }}
+              sx={{
+                flex: 1,
+                py: 0.75,
+                textAlign: "center",
+                cursor: "pointer",
+                borderBottom: compactTab === tab ? 2 : 0,
+                borderColor: "primary.main",
+                bgcolor: compactTab === tab ? "action.selected" : "transparent",
+                "&:hover": { bgcolor: "action.hover" },
+              }}
+            >
+              <Typography
+                variant="caption"
+                fontWeight={compactTab === tab ? "bold" : "normal"}
+                sx={{ textTransform: "capitalize", fontSize: "0.65rem" }}
+              >
+                {tab}
+              </Typography>
+            </Box>
+          ))}
+        </Box>
+
+        {/* Tab content */}
+        <Box sx={{ flexGrow: 1, overflow: "auto", p: 1 }}>
+          {compactTab === "interactions" ? (
+            <InteractionsList
+              interactions={interactions}
+              selectedTypes={selectedInteractionTypes}
+              onTypeFilterChange={setSelectedInteractionTypes}
+              phaseStartsRef={phaseStartsRef}
+            />
+          ) : (
+            renderSectionContent(currentSection)
+          )}
+        </Box>
+
+        {/* Active interaction banner — pinned at bottom, only when not on interactions tab */}
+        {(() => {
+          const active = interactions.find((i) => !i.complete);
+          if (!active || compactTab === "interactions") return null;
+          const hasTxTimeline =
+            active.type === "sendTx" ||
+            active.type === "simulateTx" ||
+            active.type === "simulateUtility";
+          return (
+            <Box
+              onClick={() => setCompactTab("interactions")}
+              sx={{
+                flexShrink: 0,
+                px: 1,
+                py: 0.5,
+                borderTop: 1,
+                borderColor: "primary.main",
+                bgcolor: "rgba(25, 118, 210, 0.08)",
+                cursor: "pointer",
+                "&:hover": { bgcolor: "rgba(25, 118, 210, 0.14)" },
+              }}
+            >
+              <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                <CircularProgress size={12} thickness={5} sx={{ flexShrink: 0 }} />
+                <Typography
+                  variant="caption"
+                  sx={{
+                    flexGrow: 1,
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                    fontSize: "0.65rem",
+                  }}
+                >
+                  {active.title}
+                </Typography>
+                <Chip
+                  label={active.status}
+                  size="small"
+                  color="primary"
+                  sx={{ height: 16, fontSize: "0.6rem", flexShrink: 0 }}
+                />
+              </Box>
+              {hasTxTimeline && (
+                <TxProgressTimeline
+                  interaction={active}
+                  phaseStartsRef={phaseStartsRef}
+                />
+              )}
+            </Box>
+          );
+        })()}
+
+        {dialogs}
+      </Box>
+    );
+  }
+
+  // ── Full layout (≥ 700px wide) — unchanged ─────────────────────────────────
   return (
     <Box
       sx={{
@@ -413,7 +600,7 @@ export function App() {
             display: "flex",
           }}
         >
-          {renderContent()}
+          {renderSectionContent(currentSection)}
         </Box>
       </Box>
 
@@ -467,28 +654,12 @@ export function App() {
             interactions={interactions}
             selectedTypes={selectedInteractionTypes}
             onTypeFilterChange={setSelectedInteractionTypes}
+            phaseStartsRef={phaseStartsRef}
           />
         </Box>
       </Box>
 
-      {/* Authorization Dialog - All requests are now batches */}
-      {currentAuth && (
-        <AuthorizationDialog
-          request={currentAuth}
-          onApprove={handleAuthApprove}
-          onDeny={handleAuthDeny}
-          queueLength={authQueue.length}
-        />
-      )}
-
-      {/* Proof Debug Export Dialog - Shown on proving failure */}
-      {proofDebugExportRequest && (
-        <ProofDebugExportDialog
-          request={proofDebugExportRequest}
-          onExport={handleProofDebugExport}
-          onCancel={handleProofDebugCancel}
-        />
-      )}
+      {dialogs}
     </Box>
   );
 }

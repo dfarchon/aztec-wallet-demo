@@ -14,22 +14,28 @@ interface FunctionTiming {
 }
 
 /**
- * Timing breakdown from simulation or proving stats
+ * Timing breakdown from simulation or proving stats.
+ * Wall-clock phases (simulation, sending, mining) are injected at the origin
+ * so the display component can stay dumb.
  */
 interface StatsTimings {
   sync: number;
   publicSimulation?: number;
   validation?: number;
-  proving?: number; // Only present in ProvingStats - actual proof generation time
+  proving?: number;    // circuit proof time
   perFunction: FunctionTiming[];
   unaccounted: number;
   total: number;
+  // Wall-clock phases injected at origin for sendTx
+  simulation?: number; // prepare-phase simulation time
+  sending?: number;
+  mining?: number;
 }
 
 /**
- * Simulation stats structure from TxSimulationResult
+ * Stats structure from TxSimulationResult / TxProvingResult.
  */
-export interface SimulationStats {
+export interface ExecutionStats {
   timings: StatsTimings;
   nodeRPCCalls?: {
     perMethod: Partial<Record<string, { times: number[] }>>;
@@ -38,23 +44,6 @@ export interface SimulationStats {
       roundTripMethods: string[][];
     };
   };
-}
-
-/**
- * Proving stats structure from TxProvingResult
- */
-export interface ProvingStats {
-  timings: StatsTimings;
-}
-
-/**
- * Phase timings stored with transaction interactions
- */
-export interface StoredPhaseTimings {
-  simulation?: number;
-  proving?: number;
-  sending?: number;
-  mining?: number;
 }
 
 /**
@@ -95,196 +84,79 @@ const formatDurationLong = (ms: number): string => {
 };
 
 /**
- * Extracts phase timings from simulation stats
+ * Extracts phase timings from stats.
+ *
+ * For sendTx, the stats object is enriched at the origin with wall-clock phases
+ * (simulation, sending, mining) so this function stays dumb — it just reads what's there.
  */
-export function extractPhasesFromStats(stats: SimulationStats | ProvingStats | undefined): PhaseTiming[] {
+export function extractPhasesFromStats(
+  stats: ExecutionStats | undefined,
+  isUtility = false,
+): PhaseTiming[] {
   if (!stats?.timings) return [];
 
   const phases: PhaseTiming[] = [];
-  const timings = stats.timings;
+  const t = stats.timings;
 
-  // Sync phase
-  if (timings.sync > 0) {
-    phases.push({
-      name: "Sync",
-      duration: timings.sync,
-      color: "#90caf9", // light blue
-    });
+  if (t.simulation && t.simulation > 0) {
+    phases.push({ name: "Simulation", duration: t.simulation, color: "#ff9800" });
   }
 
-  // Per-function (witness generation) phase
-  if (timings.perFunction?.length > 0) {
-    const witgenTotal = timings.perFunction.reduce(
-      (sum, fn) => sum + fn.time,
-      0
-    );
+  if (t.sync > 0) {
+    phases.push({ name: "Sync", duration: t.sync, color: "#90caf9" });
+  }
+
+  if (t.perFunction?.length > 0) {
+    const total = t.perFunction.reduce((s, fn) => s + fn.time, 0);
     phases.push({
-      name: "Witgen",
-      duration: witgenTotal,
-      color: "#ffb74d", // orange
-      breakdown: timings.perFunction.map((fn) => ({
+      name: isUtility ? "Execution" : "Witgen",
+      duration: total,
+      color: "#ffb74d",
+      breakdown: t.perFunction.map((fn) => ({
         label: fn.functionName.split(":").pop() || fn.functionName,
         duration: fn.time,
       })),
     });
   }
 
-  // Public simulation phase
-  if (timings.publicSimulation && timings.publicSimulation > 0) {
-    phases.push({
-      name: "Public Sim",
-      duration: timings.publicSimulation,
-      color: "#81c784", // green
-    });
+  if (!t.proving && t.publicSimulation && t.publicSimulation > 0) {
+    phases.push({ name: "Public Sim", duration: t.publicSimulation, color: "#81c784" });
   }
 
-  // Validation phase
-  if (timings.validation && timings.validation > 0) {
-    phases.push({
-      name: "Validation",
-      duration: timings.validation,
-      color: "#ce93d8", // purple
-    });
+  if (!t.proving && t.validation && t.validation > 0) {
+    phases.push({ name: "Validation", duration: t.validation, color: "#ce93d8" });
   }
 
-  // Proving phase (only exists in ProvingStats - actual proof generation)
-  if (timings.proving && timings.proving > 0) {
-    phases.push({
-      name: "Proving",
-      duration: timings.proving,
-      color: "#f48fb1", // pink
-    });
+  if (t.proving && t.proving > 0) {
+    phases.push({ name: "Proving", duration: t.proving, color: "#f48fb1" });
   }
 
-  // Unaccounted time
-  if (timings.unaccounted > 0) {
-    phases.push({
-      name: "Other",
-      duration: timings.unaccounted,
-      color: "#bdbdbd", // gray
-    });
+  if (t.unaccounted > 0) {
+    phases.push({ name: "Other", duration: t.unaccounted, color: "#bdbdbd" });
+  }
+
+  if (t.sending && t.sending > 0) {
+    phases.push({ name: "Sending", duration: t.sending, color: "#2196f3" });
+  }
+
+  if (t.mining && t.mining > 0) {
+    phases.push({ name: "Mining", duration: t.mining, color: "#4caf50" });
   }
 
   return phases;
 }
 
-/**
- * Extracts phase timings from phase timing data stored with interaction.
- *
- * IMPORTANT: When provingStats is available, it REPLACES simulationStats entirely.
- * The timeline shows what actually happened during proving, not the prepare-phase simulation.
- *
- * The breakdown (Sync, Witgen with perFunction, Other) comes from:
- * - provingStats if available (after tx is sent)
- * - simulationStats as fallback (before proving completes)
- *
- * Phases shown:
- * - Sync, Witgen (with perFunction breakdown), Other (from stats)
- * - Sending (wall clock time)
- * - Mining (wall clock time)
- */
-export function extractPhasesFromPhaseTimings(
-  phaseTimings: StoredPhaseTimings | undefined,
-  simulationStats?: SimulationStats,
-  provingStats?: ProvingStats
-): PhaseTiming[] {
-  if (!phaseTimings) return [];
-
-  const phases: PhaseTiming[] = [];
-
-  // Use provingStats if available (REPLACES simulation stats), otherwise use simulationStats
-  // provingStats represents what actually happened during proving
-  const stats = provingStats || simulationStats;
-
-  if (stats?.timings) {
-    const timings = stats.timings;
-
-    // Sync phase
-    if (timings.sync > 0) {
-      phases.push({
-        name: "Sync",
-        duration: timings.sync,
-        color: "#90caf9", // light blue
-      });
-    }
-
-    // Witgen phase (witness generation) with perFunction breakdown
-    if (timings.perFunction?.length > 0) {
-      const witgenTotal = timings.perFunction.reduce(
-        (sum, fn) => sum + fn.time,
-        0
-      );
-      phases.push({
-        name: "Witgen",
-        duration: witgenTotal,
-        color: "#ffb74d", // orange
-        breakdown: timings.perFunction.map((fn) => ({
-          label: fn.functionName.split(":").pop() || fn.functionName,
-          duration: fn.time,
-        })),
-      });
-    }
-
-    // Public simulation phase (only from simulationStats, not during proving)
-    if (!provingStats && timings.publicSimulation && timings.publicSimulation > 0) {
-      phases.push({
-        name: "Public Sim",
-        duration: timings.publicSimulation,
-        color: "#81c784", // green
-      });
-    }
-
-    // Validation phase (only from simulationStats, not during proving)
-    if (!provingStats && timings.validation && timings.validation > 0) {
-      phases.push({
-        name: "Validation",
-        duration: timings.validation,
-        color: "#ce93d8", // purple
-      });
-    }
-
-    // Proving phase (only exists in ProvingStats - actual proof generation)
-    if (timings.proving && timings.proving > 0) {
-      phases.push({
-        name: "Proving",
-        duration: timings.proving,
-        color: "#f48fb1", // pink
-      });
-    }
-
-    // Unaccounted time
-    if (timings.unaccounted > 0) {
-      phases.push({
-        name: "Other",
-        duration: timings.unaccounted,
-        color: "#bdbdbd", // gray
-      });
-    }
-  }
-
-  if (phaseTimings.sending && phaseTimings.sending > 0) {
-    phases.push({
-      name: "Sending",
-      duration: phaseTimings.sending,
-      color: "#2196f3", // blue
-    });
-  }
-
-  if (phaseTimings.mining && phaseTimings.mining > 0) {
-    phases.push({
-      name: "Mining",
-      duration: phaseTimings.mining,
-      color: "#4caf50", // green
-    });
-  }
-
-  return phases;
-}
 
 /**
  * Phase timeline tooltip content
  */
-function PhaseTooltipContent({ phase, percentage }: { phase: PhaseTiming; percentage: number }) {
+function PhaseTooltipContent({
+  phase,
+  percentage,
+}: {
+  phase: PhaseTiming;
+  percentage: number;
+}) {
   return (
     <Box sx={{ p: 0.5 }}>
       <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
@@ -294,7 +166,9 @@ function PhaseTooltipContent({ phase, percentage }: { phase: PhaseTiming; percen
         {formatDurationLong(phase.duration)} ({percentage.toFixed(1)}%)
       </Typography>
       {phase.breakdown && phase.breakdown.length > 0 && (
-        <Box sx={{ mt: 1, pl: 1, borderLeft: "2px solid", borderColor: "divider" }}>
+        <Box
+          sx={{ mt: 1, pl: 1, borderLeft: "2px solid", borderColor: "divider" }}
+        >
           {phase.breakdown.map((item, idx) => (
             <Typography key={idx} variant="caption" sx={{ display: "block" }}>
               {item.label}: {formatDuration(item.duration)}
@@ -344,80 +218,90 @@ export function PhaseTimeline({
     return null;
   }
 
-  const barHeight = height ?? (size === "compact" ? 8 : size === "normal" ? 16 : 24);
-  const showSegmentLabels = showLabels && size !== "compact";
+  const isCompact = size === "compact";
+  const barHeight = height ?? (isCompact ? 14 : size === "normal" ? 16 : 24);
+  const showSegmentLabels = showLabels && !isCompact;
   const minSegmentWidthForLabel = size === "detailed" ? 40 : 60;
   const hasMining = miningDuration > 0;
+  const chipHeight = isCompact ? 18 : 20;
+  const chipFontSize = isCompact ? "0.6rem" : "0.65rem";
 
   return (
     <Box sx={{ width: "100%" }}>
-      {/* Time chips and legend */}
-      {size !== "compact" && (
-        <Box
-          sx={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            mb: 0.5,
-          }}
-        >
-          <Box sx={{ display: "flex", gap: 0.5, flexWrap: "wrap" }}>
-            {hasMining ? (
-              // Show: Preparing TX | Mining | Total
-              <>
-                <Chip
-                  label={`Preparing TX: ${formatDuration(preparingDuration)}`}
-                  size="small"
-                  sx={{ height: 20, fontSize: "0.65rem", fontWeight: 600, bgcolor: "#1565c0", color: "white" }}
-                />
-                <Chip
-                  label={`Mining: ${formatDuration(miningDuration)}`}
-                  size="small"
-                  sx={{ height: 20, fontSize: "0.65rem", fontWeight: 600, bgcolor: "#4caf50", color: "white" }}
-                />
-                <Chip
-                  label={`Total: ${formatDuration(totalDuration)}`}
-                  size="small"
-                  sx={{ height: 20, fontSize: "0.65rem", fontWeight: 600 }}
-                />
-              </>
-            ) : (
-              // Just show total (simulation only, no mining)
-              <Chip
-                label={`Total: ${formatDuration(totalDuration)}`}
-                size="small"
-                sx={{ height: 20, fontSize: "0.7rem", fontWeight: 600 }}
-              />
-            )}
-          </Box>
-          {size === "detailed" && (
-            <Box sx={{ display: "flex", gap: 1, flexWrap: "wrap" }}>
-              {phases.map((phase) => (
+      {/* Summary chips — shown in all sizes */}
+      <Box
+        sx={{
+          display: "flex",
+          gap: 0.5,
+          mb: 0.5,
+          flexWrap: "wrap",
+          alignItems: "center",
+        }}
+      >
+        {hasMining ? (
+          <>
+            <Chip
+              label={`Preparing: ${formatDuration(preparingDuration)}`}
+              size="small"
+              sx={{
+                height: chipHeight,
+                fontSize: chipFontSize,
+                fontWeight: 600,
+                bgcolor: "#1565c0",
+                color: "white",
+              }}
+            />
+            <Chip
+              label={`Mining: ${formatDuration(miningDuration)}`}
+              size="small"
+              sx={{
+                height: chipHeight,
+                fontSize: chipFontSize,
+                fontWeight: 600,
+                bgcolor: "#4caf50",
+                color: "white",
+              }}
+            />
+            <Chip
+              label={`Total: ${formatDuration(totalDuration)}`}
+              size="small"
+              sx={{
+                height: chipHeight,
+                fontSize: chipFontSize,
+                fontWeight: 600,
+              }}
+            />
+          </>
+        ) : (
+          <Chip
+            label={`Total: ${formatDuration(totalDuration)}`}
+            size="small"
+            sx={{ height: chipHeight, fontSize: chipFontSize, fontWeight: 600 }}
+          />
+        )}
+        {size === "detailed" && (
+          <Box sx={{ display: "flex", gap: 1, flexWrap: "wrap", ml: "auto" }}>
+            {phases.map((phase) => (
+              <Box
+                key={phase.name}
+                sx={{ display: "flex", alignItems: "center", gap: 0.5 }}
+              >
                 <Box
-                  key={phase.name}
                   sx={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 0.5,
+                    width: 8,
+                    height: 8,
+                    borderRadius: "50%",
+                    bgcolor: phase.color,
                   }}
-                >
-                  <Box
-                    sx={{
-                      width: 8,
-                      height: 8,
-                      borderRadius: "50%",
-                      bgcolor: phase.color,
-                    }}
-                  />
-                  <Typography variant="caption" color="text.secondary">
-                    {phase.name}
-                  </Typography>
-                </Box>
-              ))}
-            </Box>
-          )}
-        </Box>
-      )}
+                />
+                <Typography variant="caption" color="text.secondary">
+                  {phase.name}
+                </Typography>
+              </Box>
+            ))}
+          </Box>
+        )}
+      </Box>
 
       {/* Timeline bar */}
       <Box
@@ -425,7 +309,7 @@ export function PhaseTimeline({
           display: "flex",
           width: "100%",
           height: barHeight,
-          borderRadius: 1,
+          borderRadius: 0.5,
           overflow: "hidden",
           bgcolor: "action.hover",
         }}
@@ -435,12 +319,14 @@ export function PhaseTimeline({
           const segmentWidth = `${percentage}%`;
           const showLabel =
             showSegmentLabels &&
-            percentage > (100 * minSegmentWidthForLabel) / 300; // Rough calculation for label fit
+            percentage > (100 * minSegmentWidthForLabel) / 300;
 
           return (
             <Tooltip
               key={phase.name}
-              title={<PhaseTooltipContent phase={phase} percentage={percentage} />}
+              title={
+                <PhaseTooltipContent phase={phase} percentage={percentage} />
+              }
               arrow
               placement="top"
             >
@@ -449,7 +335,7 @@ export function PhaseTimeline({
                 onMouseLeave={() => setHoveredPhase(null)}
                 sx={{
                   width: segmentWidth,
-                  minWidth: percentage > 0 ? 2 : 0, // Minimum visible width
+                  minWidth: percentage > 0 ? 2 : 0,
                   height: "100%",
                   bgcolor: phase.color,
                   display: "flex",
@@ -461,7 +347,8 @@ export function PhaseTimeline({
                     index < phases.length - 1
                       ? "1px solid rgba(255,255,255,0.3)"
                       : undefined,
-                  transform: hoveredPhase === phase.name ? "scaleY(1.1)" : "scaleY(1)",
+                  transform:
+                    hoveredPhase === phase.name ? "scaleY(1.1)" : "scaleY(1)",
                   zIndex: hoveredPhase === phase.name ? 1 : 0,
                   "&:hover": {
                     filter: "brightness(1.1)",
@@ -490,16 +377,38 @@ export function PhaseTimeline({
         })}
       </Box>
 
-      {/* Compact mode total time below */}
-      {size === "compact" && (
-        <Typography
-          variant="caption"
-          color="text.secondary"
-          sx={{ fontSize: "0.65rem", mt: 0.25, display: "block" }}
-        >
-          {formatDuration(totalDuration)}
-        </Typography>
-      )}
+      {/* Legend — always shown */}
+      <Box
+        sx={{
+          display: "flex",
+          gap: isCompact ? 0.75 : 1,
+          mt: 0.5,
+          flexWrap: "wrap",
+        }}
+      >
+        {phases.map((phase) => (
+          <Box
+            key={phase.name}
+            sx={{ display: "flex", alignItems: "center", gap: 0.3 }}
+          >
+            <Box
+              sx={{
+                width: isCompact ? 6 : 8,
+                height: isCompact ? 6 : 8,
+                borderRadius: "50%",
+                bgcolor: phase.color,
+              }}
+            />
+            <Typography
+              variant="caption"
+              color="text.secondary"
+              sx={{ fontSize: isCompact ? "0.6rem" : "0.65rem" }}
+            >
+              {phase.name}
+            </Typography>
+          </Box>
+        ))}
+      </Box>
     </Box>
   );
 }
@@ -511,40 +420,10 @@ export function SimulationPhaseTimeline({
   stats,
   size = "normal",
 }: {
-  stats: SimulationStats | ProvingStats | undefined;
+  stats: ExecutionStats | undefined;
   size?: "compact" | "normal" | "detailed";
 }) {
   const phases = useMemo(() => extractPhasesFromStats(stats), [stats]);
   return <PhaseTimeline phases={phases} size={size} />;
 }
 
-/**
- * Convenience component for sendTx interactions showing all phases.
- * For sent transactions: shows Sync, Witgen, Other (from simulationStats), then Proving, Sending, Mining.
- * For simulations only: shows breakdown from simulationStats.
- */
-export function TransactionPhaseTimeline({
-  simulationStats,
-  phaseTimings,
-  provingStats,
-  size = "normal",
-}: {
-  simulationStats?: SimulationStats;
-  phaseTimings?: StoredPhaseTimings;
-  provingStats?: ProvingStats;
-  size?: "compact" | "normal" | "detailed";
-}) {
-  const phases = useMemo(() => {
-    // If we have detailed phase timings (sent tx), use those with stats for breakdown
-    if (phaseTimings) {
-      return extractPhasesFromPhaseTimings(phaseTimings, simulationStats, provingStats);
-    }
-    // Otherwise fall back to simulation stats only (simulate without send)
-    if (simulationStats) {
-      return extractPhasesFromStats(simulationStats);
-    }
-    return [];
-  }, [simulationStats, phaseTimings, provingStats]);
-
-  return <PhaseTimeline phases={phases} size={size} />;
-}

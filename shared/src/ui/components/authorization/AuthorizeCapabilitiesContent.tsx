@@ -128,7 +128,10 @@ export function AuthorizeCapabilitiesContent({
       ) as AccountsCapability | undefined;
       const shouldEnableAuthWit = accountsCap?.canCreateAuthWit ?? false;
 
-      // Check if getAccounts is already granted
+      // Build the set of previously-granted account addresses (from the capability's accounts list)
+      const grantedAddresses = new Set<string>(
+        (accountsCap as any)?.accounts?.map((a: Aliased<AztecAddress>) => a.item.toString()) ?? [],
+      );
       const hasGetAccountsGrant = existingGrants.get("getAccounts") === true;
 
       setAccounts(
@@ -136,8 +139,14 @@ export function AuthorizeCapabilitiesContent({
           address: acc.item.toString(),
           alias: acc.alias,
           originalAlias: acc.alias,
-          // First time: select all, Returning: only if granted
-          selected: isAppFirstTime || hasGetAccountsGrant,
+          // First time: select all.
+          // Returning: select only if this specific account was previously granted.
+          // (Falls back to full grant if no per-account list is present.)
+          selected: isAppFirstTime
+            ? true
+            : grantedAddresses.size > 0
+              ? grantedAddresses.has(acc.item.toString())
+              : hasGetAccountsGrant,
           allowAuthWit: shouldEnableAuthWit, // Enable if manifest requests it
         })),
       );
@@ -941,7 +950,7 @@ export function AuthorizeCapabilitiesContent({
                 </Box>
               </AccordionSummary>
 
-              <AccordionDetails sx={{ pt: 0, pb: 1, pl: 5, pr: 1.5 }}>
+              <AccordionDetails sx={{ pt: 0, pb: 1, pl: { xs: 1, sm: 5 }, pr: 1.5 }}>
                 {/* Accounts Capability */}
                 {isAccountsCapability && (
                   <AccountsCapabilityDetails

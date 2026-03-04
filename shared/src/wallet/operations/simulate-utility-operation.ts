@@ -166,11 +166,7 @@ export class SimulateUtilityOperation extends ExternalOperation<
     const title = `${contractName}.${call.name}`;
 
     // Store the utility trace and stats for display
-    await this.db.storeUtilityTrace(
-      payloadHash,
-      executionTrace,
-      simulationResult.stats,
-    );
+    await this.db.storeUtilityTrace(payloadHash, executionTrace, simulationResult.stats);
 
     // Generate storage key for capability matching based on contract:function pattern
     const storageKey = `simulateUtility:${call.to.toString()}:${call.name}`;

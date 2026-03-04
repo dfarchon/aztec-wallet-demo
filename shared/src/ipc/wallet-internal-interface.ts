@@ -98,13 +98,17 @@ const StatsTimingsSchema = z.object({
   sync: z.number(),
   publicSimulation: z.number().optional(),
   validation: z.number().optional(),
-  proving: z.number().optional(), // Only present in ProvingStats - actual proof generation time
+  proving: z.number().optional(),
   perFunction: z.array(FunctionTimingSchema),
   unaccounted: z.number(),
   total: z.number(),
+  // Wall-clock phases injected at origin
+  simulation: z.number().optional(),
+  sending: z.number().optional(),
+  mining: z.number().optional(),
 });
 
-const SimulationStatsSchema = z.object({
+const ExecutionStatsSchema = z.object({
   timings: StatsTimingsSchema,
   nodeRPCCalls: z
     .object({
@@ -117,16 +121,7 @@ const SimulationStatsSchema = z.object({
     .optional(),
 });
 
-const ProvingStatsSchema = z.object({
-  timings: StatsTimingsSchema,
-});
 
-const StoredPhaseTimingsSchema = z.object({
-  simulation: z.number().optional(),
-  proving: z.number().optional(),
-  sending: z.number().optional(),
-  mining: z.number().optional(),
-});
 
 // Internal wallet interface - extends external with internal-only methods
 export type InternalWalletInterface = Omit<Wallet, "getAccounts"> & {
@@ -142,9 +137,7 @@ export type InternalWalletInterface = Omit<Wallet, "getAccounts"> & {
   getExecutionTrace(interactionId: string): Promise<
     | {
         trace?: DecodedExecutionTrace;
-        stats?: z.infer<typeof SimulationStatsSchema>;
-        provingStats?: z.infer<typeof ProvingStatsSchema>;
-        phaseTimings?: z.infer<typeof StoredPhaseTimingsSchema>;
+        stats?: z.infer<typeof ExecutionStatsSchema>;
         from?: string;
         embeddedPaymentMethodFeePayer?: string;
       }
@@ -159,6 +152,7 @@ export type InternalWalletInterface = Omit<Wallet, "getAccounts"> & {
   // App authorization management
   listAuthorizedApps(): Promise<string[]>;
   getAppCapabilities(appId: string): Promise<GrantedCapability[]>;
+  getAppRequestedManifest(appId: string): Promise<any | undefined>;
   capabilityToStorageKeys(capability: GrantedCapability): Promise<string[]>;
   storeCapabilityGrants(
     appId: string,
@@ -215,9 +209,7 @@ export const InternalWalletInterfaceSchema: ApiSchemaFor<InternalWalletInterface
         optional(
           z.object({
             trace: DecodedExecutionTraceSchema.optional(),
-            stats: SimulationStatsSchema.optional(),
-            provingStats: ProvingStatsSchema.optional(),
-            phaseTimings: StoredPhaseTimingsSchema.optional(),
+            stats: ExecutionStatsSchema.optional(),
             from: z.string().optional(),
             embeddedPaymentMethodFeePayer: z.string().optional(),
           })
@@ -239,6 +231,11 @@ export const InternalWalletInterfaceSchema: ApiSchemaFor<InternalWalletInterface
       .function()
       .args(z.string())
       .returns(z.array(z.any())),
+    // @ts-ignore
+    getAppRequestedManifest: z
+      .function()
+      .args(z.string())
+      .returns(z.any().optional()),
     // @ts-ignore
     capabilityToStorageKeys: z
       .function()

@@ -7,7 +7,6 @@ import type { AztecAddress } from "@aztec/stdlib/aztec-address";
 import {
   TxSimulationResult,
   type TxExecutionRequest,
-  type SimulationStats,
   type ExecutionPayload,
   mergeExecutionPayloads,
 } from "@aztec/stdlib/tx";
@@ -17,7 +16,7 @@ import {
   WalletInteraction,
   type WalletInteractionType,
 } from "../types/wallet-interaction";
-import type { WalletDB } from "../database/wallet-db";
+import type { WalletDB, StoredStats } from "../database/wallet-db";
 import type { InteractionManager } from "../managers/interaction-manager";
 import type { AuthorizationManager } from "../managers/authorization-manager";
 import type { DecodingCache } from "../decoding/decoding-cache";
@@ -87,7 +86,7 @@ type SimulateTxDisplayData = {
   title: string;
   from: AztecAddress;
   decoded: ReadableTxInformation;
-  stats?: SimulationStats;
+  stats?: StoredStats;
   embeddedPaymentMethodFeePayer?: string;
 };
 
@@ -196,6 +195,7 @@ export class SimulateTxOperation extends ExternalOperation<
     const blockHeader = await this.pxe.getSyncedBlockHeader();
 
     // STEP 2: Run both paths in parallel
+    const simulationStart = Date.now();
     const [optimizedResults, normalResult] = await Promise.all([
       optimizableCalls.length > 0
         ? simulateViaNode(
@@ -223,14 +223,21 @@ export class SimulateTxOperation extends ExternalOperation<
     ]);
 
     // STEP 3: Build the final merged TxSimulationResult
+    const wallTime = Date.now() - simulationStart;
     const simulationResult = buildMergedSimulationResult(
       optimizedResults,
       normalResult?.result ?? null,
     );
+    // Build metadata stats: prefer the real stats from simulation, but for public-view-only
+    // simulations stats is null so inject a minimal object with the wall-clock total.
+    const metadataStats: StoredStats = simulationResult.stats
+      ? (simulationResult.stats as StoredStats)
+      : { timings: { sync: 0, perFunction: [], unaccounted: 0, total: wallTime, simulation: wallTime } };
 
     await this.db.storeTxSimulation(payloadHash, simulationResult, {
       from: opts.from.toString(),
       embeddedPaymentMethodFeePayer: executionPayload.feePayer?.toString(),
+      stats: metadataStats,
     });
 
     // STEP 4: Decode the transaction (including optimized public calls if any)
@@ -249,7 +256,7 @@ export class SimulateTxOperation extends ExternalOperation<
         title,
         from: opts.from,
         decoded,
-        stats: simulationResult.stats,
+        stats: metadataStats,
         embeddedPaymentMethodFeePayer: executionPayload.feePayer?.toString(),
       },
       executionData: {

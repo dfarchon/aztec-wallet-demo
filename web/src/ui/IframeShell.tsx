@@ -40,6 +40,15 @@ import { EmojiVerification } from "./components/EmojiVerification.tsx";
 import { Fr } from "@aztec/aztec.js/fields";
 
 const themeOptions: ThemeOptions = {
+  breakpoints: {
+    values: {
+      xs: 0,
+      sm: 360,
+      md: 700,
+      lg: 1200,
+      xl: 1536,
+    },
+  },
   palette: {
     mode: "dark",
     primary: { main: colors.primary },
@@ -170,16 +179,14 @@ function IframeContent() {
         <EmojiVerification verificationHash={verificationHash ?? ""} />
       </Dialog>
       {/* Overlay: dApp authorization requests */}
-      <Dialog open={!!currentAuth} fullScreen>
-        {currentAuth && (
-          <AuthorizationDialog
-            request={currentAuth}
-            queueLength={authQueue.length}
-            onApprove={handleAuthApprove}
-            onDeny={handleAuthDeny}
-          />
-        )}
-      </Dialog>
+      {currentAuth && (
+        <AuthorizationDialog
+          request={currentAuth}
+          queueLength={authQueue.length}
+          onApprove={handleAuthApprove}
+          onDeny={handleAuthDeny}
+        />
+      )}
     </WalletContext.Provider>
   );
 }

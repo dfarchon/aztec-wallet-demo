@@ -242,13 +242,6 @@ export class InternalWallet extends BaseNativeWallet {
     | {
         trace?: DecodedExecutionTrace;
         stats?: any;
-        provingStats?: any;
-        phaseTimings?: {
-          simulation?: number;
-          proving?: number;
-          sending?: number;
-          mining?: number;
-        };
         from?: string;
         embeddedPaymentMethodFeePayer?: string;
       }
@@ -278,14 +271,15 @@ export class InternalWallet extends BaseNativeWallet {
     const { executionTrace } = await decodingService.decodeTransaction(
       parsedSimulationResult,
     );
+    // stats is already enriched at origin with simulation/sending/mining wall-clock times.
+    // Fall back to simStats for simulate-only interactions.
+    const stats = data.metadata?.stats ?? parsedSimulationResult.stats;
+
     return {
       trace: executionTrace,
-      stats: parsedSimulationResult.stats,
-      provingStats: data.metadata?.provingStats,
-      phaseTimings: data.metadata?.phaseTimings,
+      stats,
       from: data.metadata?.from,
-      embeddedPaymentMethodFeePayer:
-        data.metadata?.embeddedPaymentMethodFeePayer,
+      embeddedPaymentMethodFeePayer: data.metadata?.embeddedPaymentMethodFeePayer,
     };
   }
 
@@ -296,6 +290,10 @@ export class InternalWallet extends BaseNativeWallet {
 
   async getAppCapabilities(appId: string): Promise<GrantedCapability[]> {
     return await this.db.reconstructCapabilitiesFromKeys(appId);
+  }
+
+  async getAppRequestedManifest(appId: string): Promise<AppCapabilities | undefined> {
+    return await this.db.getRequestedManifest(appId);
   }
 
   async capabilityToStorageKeys(
@@ -309,7 +307,7 @@ export class InternalWallet extends BaseNativeWallet {
     manifest: AppCapabilities,
     granted: GrantedCapability[],
   ): Promise<void> {
-    await this.db.storeCapabilityGrants(appId, granted);
+    await this.db.storeCapabilityGrants(appId, granted, manifest);
   }
 
   async updateAccountAuthorization(
