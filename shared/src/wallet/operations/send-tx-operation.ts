@@ -364,7 +364,7 @@ export class SendTxOperation<
       const timingSummary = `Witgen: ${formatDuration(witgenTime)} | Prove: ${formatDuration(provingTime)} | Send: ${formatDuration(sendingTime)}`;
       await this.emitProgress("SENT", timingSummary, true);
       const enrichedStats = { ...rawStats, timings: { ...rawStats.timings, simulation: executionData.simulationTime, sending: sendingTime } };
-      await this.db.updateTxSimulationWithStats(executionData.payloadHash, enrichedStats);
+      await this.db.updateTxPayloadStats(executionData.payloadHash, enrichedStats);
       return txHash as SendTxResult<W>;
     }
 
@@ -380,7 +380,7 @@ export class SendTxOperation<
     await this.emitProgress("SENT", timingSummary, true);
 
     const enrichedStats = { ...rawStats, timings: { ...rawStats.timings, simulation: executionData.simulationTime, sending: sendingTime, mining: miningTime } };
-    await this.db.updateTxSimulationWithStats(executionData.payloadHash, enrichedStats);
+    await this.db.updateTxPayloadStats(executionData.payloadHash, enrichedStats);
 
     return receipt as SendTxResult<W>;
   }

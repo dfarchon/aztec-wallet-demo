@@ -6,12 +6,24 @@ import DragIndicatorIcon from "@mui/icons-material/DragIndicator";
 interface DraggableFabProps {
   onClick: () => void;
   icon?: ReactNode;
-  color?: "primary" | "secondary" | "default" | "inherit" | "error" | "info" | "success" | "warning";
+  color?:
+    | "primary"
+    | "secondary"
+    | "default"
+    | "inherit"
+    | "error"
+    | "info"
+    | "success"
+    | "warning";
 }
 
-export function DraggableFab({ onClick, icon = <AddIcon />, color = "primary" }: DraggableFabProps) {
+export function DraggableFab({
+  onClick,
+  icon = <AddIcon />,
+  color = "primary",
+}: DraggableFabProps) {
   const [fabPosition, setFabPosition] = useState({
-    bottom: 16,
+    bottom: 120,
     right: 16,
   });
   const [isDragging, setIsDragging] = useState(false);

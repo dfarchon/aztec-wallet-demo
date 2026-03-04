@@ -106,7 +106,7 @@ export function App() {
     phaseStartsRef.current.clear();
 
     loadInteractions();
-    walletAPI.onWalletUpdate((interaction) => {
+    const unsubWalletUpdate = walletAPI.onWalletUpdate((interaction) => {
       // Always record when each phase begins (overwrite on re-runs of same interaction id,
       // e.g. recurring simulateUtility calls that share the same payloadHash as id).
       const phaseKey = `${interaction.id}:${interaction.status}`;
@@ -134,7 +134,7 @@ export function App() {
       });
     });
 
-    walletAPI.onAuthorizationRequest((request: AuthorizationRequest) => {
+    const unsubAuthRequest = walletAPI.onAuthorizationRequest((request: AuthorizationRequest) => {
       console.log("New authorization request:", request);
       setAuthQueue((prev) => {
         if (prev.some((req) => req.id === request.id)) {
@@ -150,6 +150,11 @@ export function App() {
         setProofDebugExportRequest(request);
       }
     );
+
+    return () => {
+      unsubWalletUpdate();
+      unsubAuthRequest();
+    };
   }, [currentNetwork.id, walletAPI]);
 
   const handleMenuToggle = () => {
@@ -267,6 +272,7 @@ export function App() {
           onApprove={handleAuthApprove}
           onDeny={handleAuthDeny}
           queueLength={authQueue.length}
+          wide={!isCompact}
         />
       )}
       {proofDebugExportRequest && (
@@ -366,7 +372,8 @@ export function App() {
           const hasTxTimeline =
             active.type === "sendTx" ||
             active.type === "simulateTx" ||
-            active.type === "simulateUtility";
+            active.type === "simulateUtility" ||
+            active.type === "createAccount";
           return (
             <Box
               onClick={() => setCompactTab("interactions")}

@@ -61,7 +61,7 @@ export class WalletDB {
     private bridgedFeeJuice: AztecAsyncMap<string, Buffer>,
     private interactions: AztecAsyncMap<string, Buffer>,
     private authorizations: AztecAsyncMap<string, Buffer>,
-    private txSimulations: AztecAsyncMap<string, string>,
+    private txPayloadData: AztecAsyncMap<string, string>,
     private logger: Logger,
   ) {}
 
@@ -71,14 +71,14 @@ export class WalletDB {
     const bridgedFeeJuice = store.openMap<string, Buffer>("bridgedFeeJuice");
     const interactions = store.openMap<string, Buffer>("interactions");
     const authorizations = store.openMap<string, Buffer>("authorizations");
-    const txSimulations = store.openMap<string, string>("txSimulations");
+    const txPayloadData = store.openMap<string, string>("txPayloadData");
     return new WalletDB(
       accounts,
       aliases,
       bridgedFeeJuice,
       interactions,
       authorizations,
-      txSimulations,
+      txPayloadData,
       logger,
     );
   }
@@ -288,7 +288,7 @@ export class WalletDB {
     for await (const [_, item] of this.interactions.entriesAsync()) {
       result.push(WalletInteraction.fromBuffer(item));
     }
-    // Sort by timestamp descending (newest first)
+    // Sort by timestamp descending (most recently updated first)
     return result.sort((a, b) => b.timestamp - a.timestamp);
   }
 
@@ -897,7 +897,7 @@ export class WalletDB {
     );
   }
 
-  async storeTxSimulation(
+  async storeTxPayloadData(
     payloadHash: string,
     simulationResult: TxSimulationResult,
     metadata?: {
@@ -910,13 +910,13 @@ export class WalletDB {
       simulationResult,
       metadata,
     });
-    await this.txSimulations.set(payloadHash, data);
+    await this.txPayloadData.set(payloadHash, data);
     this.logger.info(
       `Transaction simulation stored for payload hash ${payloadHash}`,
     );
   }
 
-  async getTxSimulation(payloadHash: string): Promise<
+  async getTxPayloadData(payloadHash: string): Promise<
     | {
         simulationResult: TxSimulationResult;
         metadata?: {
@@ -927,7 +927,7 @@ export class WalletDB {
       }
     | undefined
   > {
-    const result = await this.txSimulations.getAsync(payloadHash);
+    const result = await this.txPayloadData.getAsync(payloadHash);
     if (!result) {
       return undefined;
     }
@@ -935,30 +935,24 @@ export class WalletDB {
   }
 
   /**
-   * Store enriched proving stats for a completed tx.
-   * The stats object carries all timing data (simulation, proving, sending, mining).
+   * Store stats associated with a payload hash.
+   * Works for txs that went through simulation (upserts the metadata.stats field)
+   * and for txs that didn't simulate (e.g. createAccount — stores stats-only record).
    */
-  async updateTxSimulationWithStats(
+  async updateTxPayloadStats(
     payloadHash: string,
     stats: StoredStats,
   ): Promise<void> {
-    const existing = await this.getTxSimulation(payloadHash);
-    if (!existing) {
-      this.logger.warn(
-        `Cannot update proving data: no simulation found for ${payloadHash}`,
-      );
-      return;
-    }
-
-    const metadata = existing.metadata || {};
+    const existing = await this.getTxPayloadData(payloadHash);
+    const metadata = existing?.metadata ?? {};
     metadata.stats = stats;
 
     const data = jsonStringify({
-      ...existing,
+      ...(existing ?? {}),
       metadata,
     });
-    await this.txSimulations.set(payloadHash, data);
-    this.logger.debug(`Proving stats updated for payload hash ${payloadHash}`);
+    await this.txPayloadData.set(payloadHash, data);
+    this.logger.debug(`Payload stats stored for ${payloadHash}`);
   }
 
   async storeUtilityTrace(payloadHash: string, trace: any, stats?: any) {
@@ -966,14 +960,14 @@ export class WalletDB {
       utilityTrace: trace,
       stats,
     });
-    await this.txSimulations.set(payloadHash, data);
+    await this.txPayloadData.set(payloadHash, data);
     this.logger.info(`Utility trace stored for payload hash ${payloadHash}`);
   }
 
   async getUtilityTrace(
     payloadHash: string,
   ): Promise<{ trace: any; stats?: any } | undefined> {
-    const result = await this.txSimulations.getAsync(payloadHash);
+    const result = await this.txPayloadData.getAsync(payloadHash);
     if (!result) {
       return undefined;
     }

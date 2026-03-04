@@ -43,18 +43,18 @@ export function getCapabilityIcon(type: Capability["type"]) {
 }
 
 // Helper to get human-readable label for capability type
-export function getCapabilityTypeName(type: Capability["type"]): string {
+export function getCapabilityTypeName(type: Capability["type"], compact?: boolean): string {
   switch (type) {
     case "accounts":
       return "Account Access";
     case "contracts":
-      return "Contract Operations";
+      return compact ? "Contracts" : "Contract Operations";
     case "contractClasses":
-      return "Contract Class Metadata";
+      return compact ? "Contract Classes" : "Contract Class Metadata";
     case "simulation":
-      return "Transaction & Utility Simulation";
+      return compact ? "Simulation" : "Transaction & Utility Simulation";
     case "transaction":
-      return "Transaction Execution";
+      return compact ? "Transactions" : "Transaction Execution";
     case "data":
       return "Data Access";
     default:

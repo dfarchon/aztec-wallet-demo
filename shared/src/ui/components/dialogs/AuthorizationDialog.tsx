@@ -41,6 +41,7 @@ interface AuthorizationDialogProps {
   onApprove: (itemResponses: Record<string, AuthorizationItemResponse>) => void;
   onDeny: () => void;
   queueLength?: number;
+  wide?: boolean;
 }
 
 interface ItemState {
@@ -167,6 +168,7 @@ export function AuthorizationDialog({
   onApprove,
   onDeny,
   queueLength = 1,
+  wide = false,
 }: AuthorizationDialogProps) {
   const theme = useTheme();
   const isSmall = useMediaQuery(theme.breakpoints.down("md"));
@@ -286,7 +288,7 @@ export function AuthorizationDialog({
   ).length;
 
   return (
-    <Dialog open={true} fullScreen={isSmall} maxWidth="md" fullWidth>
+    <Dialog open={true} fullScreen={isSmall} maxWidth={!isSmall && wide ? "lg" : "md"} fullWidth>
       <DialogTitle sx={{ py: 1, px: { xs: 1.5, sm: 3 } }}>
         <Box
           sx={{
@@ -383,18 +385,20 @@ export function AuthorizationDialog({
                       item.params.from && (
                         <Card
                           sx={{
-                            mb: 2,
+                            mb: isSmall ? 1 : 2,
                             bgcolor: "action.hover",
-                            border: "2px solid",
+                            border: isSmall ? "1px solid" : "2px solid",
                             borderColor: "primary.main",
                           }}
                         >
-                          <Box sx={{ p: { xs: 1, sm: 2 } }}>
+                          <Box sx={{ p: isSmall ? 0.75 : { xs: 1, sm: 2 } }}>
                             <Box
                               sx={{
                                 display: "flex",
-                                flexDirection: "column",
-                                gap: 1,
+                                flexDirection: isSmall ? "row" : "column",
+                                flexWrap: "wrap",
+                                gap: isSmall ? 0.5 : 1,
+                                alignItems: isSmall ? "center" : undefined,
                               }}
                             >
                               {/* App Info */}
@@ -402,13 +406,15 @@ export function AuthorizationDialog({
                                 sx={{
                                   display: "flex",
                                   alignItems: "center",
-                                  gap: 1,
+                                  gap: 0.5,
                                 }}
                               >
-                                <AppsIcon fontSize="small" color="primary" />
-                                <Typography variant="body2" fontWeight="medium">
-                                  App:
-                                </Typography>
+                                <AppsIcon fontSize={isSmall ? "inherit" : "small"} color="primary" />
+                                {!isSmall && (
+                                  <Typography variant="body2" fontWeight="medium">
+                                    App:
+                                  </Typography>
+                                )}
                                 <Chip
                                   label={request.appId}
                                   size="small"
@@ -418,50 +424,47 @@ export function AuthorizationDialog({
                                     color: "primary.main",
                                     border: "1px solid",
                                     borderColor: "primary.main",
+                                    ...(isSmall && { height: 18, fontSize: "0.65rem" }),
                                   }}
                                 />
                               </Box>
                               {/* From Account Info */}
-                              <Box
-                                sx={{
-                                  display: "flex",
-                                  alignItems: "center",
-                                  gap: 1,
-                                }}
-                              >
-                                <AccountCircle
-                                  fontSize="small"
-                                  color="primary"
-                                />
-                                <Typography variant="body2" fontWeight="medium">
-                                  From:
-                                </Typography>
-                                {(() => {
-                                  const fromAddress = item.params.from;
-                                  const account = accountList.find((a) =>
-                                    a.item.equals(
-                                      AztecAddress.fromString(fromAddress)
-                                    )
-                                  );
-                                  const internalAlias =
-                                    account?.alias || "Unknown Account";
-                                  const formattedAddress = fromAddress
-                                    ? `${fromAddress.slice(0, 10)}...${fromAddress.slice(-8)}`
-                                    : "Unknown";
-                                  return (
-                                    <Box
-                                      sx={{
-                                        display: "flex",
-                                        alignItems: "center",
-                                        gap: 1,
-                                      }}
-                                    >
-                                      <Typography
-                                        variant="body2"
-                                        fontWeight="bold"
-                                      >
-                                        {internalAlias}
+                              {(() => {
+                                const fromAddress = item.params.from;
+                                const account = accountList.find((a) =>
+                                  a.item.equals(
+                                    AztecAddress.fromString(fromAddress)
+                                  )
+                                );
+                                const internalAlias =
+                                  account?.alias || "Unknown Account";
+                                const formattedAddress = fromAddress
+                                  ? `${fromAddress.slice(0, 10)}...${fromAddress.slice(-8)}`
+                                  : "Unknown";
+                                return (
+                                  <Box
+                                    sx={{
+                                      display: "flex",
+                                      alignItems: "center",
+                                      gap: 0.5,
+                                    }}
+                                  >
+                                    <AccountCircle
+                                      fontSize={isSmall ? "inherit" : "small"}
+                                      color="primary"
+                                    />
+                                    {!isSmall && (
+                                      <Typography variant="body2" fontWeight="medium">
+                                        From:
                                       </Typography>
+                                    )}
+                                    <Typography
+                                      variant={isSmall ? "caption" : "body2"}
+                                      fontWeight="bold"
+                                    >
+                                      {internalAlias}
+                                    </Typography>
+                                    {!isSmall && (
                                       <Typography
                                         variant="caption"
                                         sx={{
@@ -471,10 +474,10 @@ export function AuthorizationDialog({
                                       >
                                         ({formattedAddress})
                                       </Typography>
-                                    </Box>
-                                  );
-                                })()}
-                              </Box>
+                                    )}
+                                  </Box>
+                                );
+                              })()}
                             </Box>
                           </Box>
                         </Card>
@@ -566,6 +569,7 @@ export function AuthorizationDialog({
                           handleItemDataChange(item.id, data);
                         }}
                         showAppId={false}
+                        compact={isSmall}
                       />
                     )}
                   </Box>

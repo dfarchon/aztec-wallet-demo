@@ -60,14 +60,14 @@ contextBridge.exposeInMainWorld("walletAPI", {
     return ipcRenderer.invoke("revokeAppAuthorizations", stringifiedArgs);
   },
   onWalletUpdate(callback) {
-    return ipcRenderer.on("wallet-update", (_event, eventData) =>
-      callback(eventData)
-    );
+    const listener = (_event: any, eventData: any) => callback(eventData);
+    ipcRenderer.on("wallet-update", listener);
+    return () => ipcRenderer.off("wallet-update", listener);
   },
   onAuthorizationRequest(callback) {
-    return ipcRenderer.on("authorization-request", (_event, eventData) =>
-      callback(eventData)
-    );
+    const listener = (_event: any, eventData: any) => callback(eventData);
+    ipcRenderer.on("authorization-request", listener);
+    return () => ipcRenderer.off("authorization-request", listener);
   },
   resolveAuthorization(stringifiedArgs: string) {
     return ipcRenderer.invoke("resolveAuthorization", stringifiedArgs);

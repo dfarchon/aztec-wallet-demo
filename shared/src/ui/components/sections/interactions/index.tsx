@@ -28,7 +28,7 @@ import type { ExecutionStats } from "../../shared/PhaseTimeline";
 import { TxProgressTimeline } from "../../shared/TxProgressTimeline";
 import { WalletContext } from "../../../renderer";
 
-const TX_TYPES: WalletInteractionType[] = ["sendTx", "simulateTx", "simulateUtility"];
+const TX_TYPES: WalletInteractionType[] = ["sendTx", "simulateTx", "simulateUtility", "createAccount"];
 
 interface InteractionsListProps {
   interactions: WalletInteraction<WalletInteractionType>[];

@@ -26,71 +26,73 @@ export function ContractsCapabilityDetails({
   }
 
   return (
-    <Box>
+    <Box sx={{ display: "flex", flexDirection: "column", gap: 0.5 }}>
       {(capability.contracts as AztecAddress[]).map((address) => {
         const addressStr = address.toString();
         const perms = contractPermissions.get(addressStr);
-        const name = contractMetadata.get(addressStr);
+        const rawName = contractMetadata.get(addressStr);
+        // Don't show name if it's a shortened address fallback (contains "...")
+        const name = rawName && !rawName.includes("...") ? rawName : undefined;
         const shortAddr = `${addressStr.slice(0, 10)}...${addressStr.slice(-8)}`;
 
         return (
           <Box
             key={addressStr}
             sx={{
-              mb: 0.5,
-              display: "flex",
-              alignItems: "center",
-              gap: 0.5,
-              flexWrap: "wrap",
+              p: 0.75,
+              border: 1,
+              borderColor: "divider",
+              borderRadius: 0.5,
+              bgcolor: "background.paper",
             }}
           >
-            {name && (
-              <Chip
-                label={name}
-                size="small"
-                color="default"
-                sx={{
-                  fontWeight: 600,
-                  height: 20,
-                  fontSize: "0.7rem",
-                }}
-              />
-            )}
-            <Typography
-              variant="caption"
-              color="text.secondary"
-              sx={{
-                fontFamily: "monospace",
-                fontSize: "0.7rem",
-              }}
-            >
-              {shortAddr}
-            </Typography>
-            {capability.canRegister && (
-              <Chip
-                label="Register"
-                size="small"
-                color={perms?.register ? "primary" : "default"}
-                onClick={() => onPermissionToggle(addressStr, "register")}
-                sx={{
-                  cursor: "pointer",
-                  height: 20,
-                  fontSize: "0.7rem",
-                }}
-              />
-            )}
-            {capability.canGetMetadata && (
-              <Chip
-                label="Metadata"
-                size="small"
-                color={perms?.metadata ? "primary" : "default"}
-                onClick={() => onPermissionToggle(addressStr, "metadata")}
-                sx={{
-                  cursor: "pointer",
-                  height: 20,
-                  fontSize: "0.7rem",
-                }}
-              />
+            {/* Contract identity */}
+            <Box sx={{ mb: 0.5 }}>
+              {name ? (
+                <>
+                  <Typography variant="caption" fontWeight={600} sx={{ display: "block" }}>
+                    {name}
+                  </Typography>
+                  <Typography
+                    variant="caption"
+                    color="text.secondary"
+                    sx={{ fontFamily: "monospace", fontSize: "0.65rem" }}
+                  >
+                    {shortAddr}
+                  </Typography>
+                </>
+              ) : (
+                <Typography
+                  variant="caption"
+                  color="text.secondary"
+                  sx={{ fontFamily: "monospace" }}
+                >
+                  {shortAddr}
+                </Typography>
+              )}
+            </Box>
+            {/* Operations */}
+            {(capability.canRegister || capability.canGetMetadata) && (
+              <Box sx={{ display: "flex", gap: 0.5 }}>
+                {capability.canRegister && (
+                  <Chip
+                    label="Register"
+                    size="small"
+                    color={perms?.register ? "primary" : "default"}
+                    onClick={() => onPermissionToggle(addressStr, "register")}
+                    sx={{ cursor: "pointer", height: 18, fontSize: "0.65rem" }}
+                  />
+                )}
+                {capability.canGetMetadata && (
+                  <Chip
+                    label="Metadata"
+                    size="small"
+                    color={perms?.metadata ? "primary" : "default"}
+                    onClick={() => onPermissionToggle(addressStr, "metadata")}
+                    sx={{ cursor: "pointer", height: 18, fontSize: "0.65rem" }}
+                  />
+                )}
+              </Box>
             )}
           </Box>
         );

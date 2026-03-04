@@ -6,6 +6,8 @@ import {
   type SendOptions,
   type GrantedCapability,
   type AppCapabilities,
+  type ContractsCapability,
+  type Capability,
 } from "@aztec/aztec.js/wallet";
 import { type Fr } from "@aztec/aztec.js/fields";
 import type { AccountType } from "../database/wallet-db";
@@ -211,10 +213,18 @@ export class InternalWallet extends BaseNativeWallet {
       await this.interactionManager.storeAndEmit(
         interaction.update({ description: timingSummary }),
       );
+      if (interaction) {
+        const rawStats = provenTx.stats;
+        await this.db.updateTxPayloadStats(interaction.id, {
+          ...rawStats,
+          timings: { ...rawStats.timings, sending: sendingTime },
+        });
+      }
       return txHash as SendReturn<W>;
     }
 
     // Otherwise, wait for the full receipt (default behavior on wait: undefined)
+    await this.interactionManager.storeAndEmit(interaction.update({ status: "MINING" }));
     const miningStartTime = Date.now();
     const waitOpts = typeof opts.wait === "object" ? opts.wait : undefined;
     const receipt = await waitForTx(this.aztecNode, txHash, waitOpts);
@@ -224,6 +234,13 @@ export class InternalWallet extends BaseNativeWallet {
     await this.interactionManager.storeAndEmit(
       interaction.update({ description: timingSummary }),
     );
+    if (interaction) {
+      const rawStats = provenTx.stats;
+      await this.db.updateTxPayloadStats(interaction.id, {
+        ...rawStats,
+        timings: { ...rawStats.timings, sending: sendingTime, mining: miningTime },
+      });
+    }
 
     return receipt as SendReturn<W>;
   }
@@ -257,9 +274,17 @@ export class InternalWallet extends BaseNativeWallet {
     }
 
     // Otherwise, retrieve the stored simulation result (full tx)
-    const data = await this.db.getTxSimulation(interactionId);
+    const data = await this.db.getTxPayloadData(interactionId);
     if (!data) {
       return undefined;
+    }
+
+    // Stats-only record (e.g. createAccount — no simulation was run)
+    if (!data.simulationResult) {
+      return {
+        stats: data.metadata?.stats,
+        from: data.metadata?.from,
+      };
     }
 
     // Use the shared decoding cache from BaseNativeWallet
@@ -279,7 +304,8 @@ export class InternalWallet extends BaseNativeWallet {
       trace: executionTrace,
       stats,
       from: data.metadata?.from,
-      embeddedPaymentMethodFeePayer: data.metadata?.embeddedPaymentMethodFeePayer,
+      embeddedPaymentMethodFeePayer:
+        data.metadata?.embeddedPaymentMethodFeePayer,
     };
   }
 
@@ -292,8 +318,64 @@ export class InternalWallet extends BaseNativeWallet {
     return await this.db.reconstructCapabilitiesFromKeys(appId);
   }
 
-  async getAppRequestedManifest(appId: string): Promise<AppCapabilities | undefined> {
-    return await this.db.getRequestedManifest(appId);
+  async getAppRequestedManifest(
+    appId: string,
+  ): Promise<
+    | { manifest: AppCapabilities; contractNames: Record<string, string> }
+    | undefined
+  > {
+    const manifest = await this.db.getRequestedManifest(appId);
+    if (!manifest) return undefined;
+
+    // Collect all contract addresses from all capabilities — same as request-capabilities-operation
+    const contractAddresses = new Set<string>();
+    for (const capability of manifest.capabilities) {
+      if (capability.type === "contracts") {
+        const cap = capability as any;
+        if (cap.contracts !== "*") {
+          for (const addr of cap.contracts)
+            contractAddresses.add(addr.toString());
+        }
+      } else if (capability.type === "simulation") {
+        const cap = capability as any;
+        for (const pattern of cap.transactions?.scope !== "*"
+          ? cap.transactions?.scope || []
+          : []) {
+          if (pattern.contract !== "*")
+            contractAddresses.add(pattern.contract.toString());
+        }
+        for (const pattern of cap.utilities?.scope !== "*"
+          ? cap.utilities?.scope || []
+          : []) {
+          if (pattern.contract !== "*")
+            contractAddresses.add(pattern.contract.toString());
+        }
+      } else if (capability.type === "transaction") {
+        const cap = capability as any;
+        if (cap.scope !== "*") {
+          for (const pattern of cap.scope) {
+            if (pattern.contract !== "*")
+              contractAddresses.add(pattern.contract.toString());
+          }
+        }
+      } else if (capability.type === "data") {
+        const cap = capability as any;
+        if (cap.privateEvents?.contracts !== "*") {
+          for (const addr of cap.privateEvents?.contracts || [])
+            contractAddresses.add(addr.toString());
+        }
+      }
+    }
+
+    const contractNames: Record<string, string> = {};
+    for (const addrStr of contractAddresses) {
+      const name = await this.decodingCache.getAddressAlias(
+        AztecAddress.fromString(addrStr),
+      );
+      contractNames[addrStr] = name;
+    }
+
+    return { manifest, contractNames };
   }
 
   async capabilityToStorageKeys(
@@ -304,8 +386,8 @@ export class InternalWallet extends BaseNativeWallet {
 
   async storeCapabilityGrants(
     appId: string,
-    manifest: AppCapabilities,
     granted: GrantedCapability[],
+    manifest?: AppCapabilities,
   ): Promise<void> {
     await this.db.storeCapabilityGrants(appId, granted, manifest);
   }

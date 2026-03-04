@@ -234,7 +234,7 @@ export class SimulateTxOperation extends ExternalOperation<
       ? (simulationResult.stats as StoredStats)
       : { timings: { sync: 0, perFunction: [], unaccounted: 0, total: wallTime, simulation: wallTime } };
 
-    await this.db.storeTxSimulation(payloadHash, simulationResult, {
+    await this.db.storeTxPayloadData(payloadHash, simulationResult, {
       from: opts.from.toString(),
       embeddedPaymentMethodFeePayer: executionPayload.feePayer?.toString(),
       stats: metadataStats,

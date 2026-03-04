@@ -50,12 +50,14 @@ interface AuthorizeCapabilitiesContentProps {
     duration: number;
   }) => void;
   showAppId?: boolean;
+  compact?: boolean;
 }
 
 export function AuthorizeCapabilitiesContent({
   request,
   onCapabilitiesChange,
   showAppId = true,
+  compact,
 }: AuthorizeCapabilitiesContentProps) {
   const manifest = request.params.manifest;
   const newCapabilityIndices = request.params.newCapabilityIndices;
@@ -741,6 +743,23 @@ export function AuthorizeCapabilitiesContent({
     });
   };
 
+  const handleTxPatternToggle = (capIndex: number, storageKey: string) => {
+    setTxPermissions((prev: Map<number, Set<string>>) => {
+      const next = new Map(prev);
+      const keySet = next.get(capIndex) ?? new Set<string>();
+      const updated = new Set(keySet);
+
+      if (updated.has(storageKey)) {
+        updated.delete(storageKey);
+      } else {
+        updated.add(storageKey);
+      }
+
+      next.set(capIndex, updated);
+      return next;
+    });
+  };
+
   // Initialize sim/tx permissions based on mode:
   // - First time (no grants exist): Check all requested permissions
   // - Returning app (some grants exist): Only check already-granted permissions
@@ -813,17 +832,17 @@ export function AuthorizeCapabilitiesContent({
 
   return (
     <>
-      {/* App Metadata - Compact */}
-      <Box sx={{ mb: 2, p: 1.5, bgcolor: "action.hover", borderRadius: 1 }}>
+      {/* App Metadata */}
+      <Box sx={{ mb: compact ? 1 : 2, p: compact ? 1 : 1.5, bgcolor: "action.hover", borderRadius: 1 }}>
         <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-          <Typography variant="subtitle1" fontWeight={600}>
+          <Typography variant={compact ? "body2" : "subtitle1"} fontWeight={600}>
             {manifest.metadata.name}
           </Typography>
           {manifest.metadata.version && (
-            <Chip label={`v${manifest.metadata.version}`} size="small" />
+            <Chip label={`v${manifest.metadata.version}`} size="small" sx={compact ? { height: 16, fontSize: "0.65rem" } : undefined} />
           )}
         </Box>
-        {manifest.metadata.description && (
+        {!compact && manifest.metadata.description && (
           <Typography
             variant="caption"
             color="text.secondary"
@@ -880,17 +899,17 @@ export function AuthorizeCapabilitiesContent({
               <AccordionSummary
                 expandIcon={<ExpandMoreIcon fontSize="small" />}
                 sx={{
-                  px: 1.5,
+                  px: compact ? 1 : 1.5,
                   py: 0.5,
                   minHeight: "unset",
-                  "& .MuiAccordionSummary-content": { my: 0.5 },
+                  "& .MuiAccordionSummary-content": { my: compact ? 0.25 : 0.5, minWidth: 0, overflow: "hidden" },
                 }}
               >
                 <Box
                   sx={{
                     display: "flex",
                     alignItems: "center",
-                    gap: 1,
+                    gap: 0.75,
                     width: "100%",
                   }}
                 >
@@ -903,38 +922,27 @@ export function AuthorizeCapabilitiesContent({
                     disabled={isTransactionCapability}
                     sx={{ p: 0 }}
                   />
-                  <Box
-                    sx={{
-                      fontSize: "1.2rem",
-                      display: "flex",
-                      alignItems: "center",
-                    }}
-                  >
-                    {getCapabilityIcon(capability.type)}
-                  </Box>
-                  <Box
-                    sx={{
-                      flexGrow: 1,
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 0.5,
-                    }}
-                  >
+                  {!compact && (
+                    <Box sx={{ fontSize: "1.2rem", display: "flex", alignItems: "center" }}>
+                      {getCapabilityIcon(capability.type)}
+                    </Box>
+                  )}
+                  <Box sx={{ flexGrow: 1, display: "flex", alignItems: "center", gap: 0.5, minWidth: 0, overflow: "hidden" }}>
                     <Typography
-                      variant="body2"
-                      fontWeight={
-                        isNewCapability && !isTransactionCapability ? 600 : 400
-                      }
+                      variant={compact ? "caption" : "body2"}
+                      fontWeight={isNewCapability && !isTransactionCapability ? 600 : 400}
+                      noWrap
+                      sx={{ minWidth: 0 }}
                     >
-                      {getCapabilityTypeName(capability.type)}
+                      {getCapabilityTypeName(capability.type, compact)}
                     </Typography>
                     {isTransactionCapability && (
                       <Chip
-                        label="Always requires approval"
+                        label={compact ? "approval req." : "Always requires approval"}
                         size="small"
                         color="warning"
                         variant="outlined"
-                        sx={{ height: 18, fontSize: "0.7rem" }}
+                        sx={{ height: 16, fontSize: "0.6rem", flexShrink: 0 }}
                       />
                     )}
                     {isAlreadyGranted && !isTransactionCapability && (
@@ -943,14 +951,14 @@ export function AuthorizeCapabilitiesContent({
                         size="small"
                         color="success"
                         variant="outlined"
-                        sx={{ height: 18, fontSize: "0.7rem" }}
+                        sx={{ height: 16, fontSize: "0.6rem", flexShrink: 0 }}
                       />
                     )}
                   </Box>
                 </Box>
               </AccordionSummary>
 
-              <AccordionDetails sx={{ pt: 0, pb: 1, pl: { xs: 1, sm: 5 }, pr: 1.5 }}>
+              <AccordionDetails sx={{ pt: 0, pb: 1, pl: compact ? 1 : { xs: 1, sm: 5 }, pr: compact ? 1 : 1.5 }}>
                 {/* Accounts Capability */}
                 {isAccountsCapability && (
                   <AccountsCapabilityDetails
@@ -1027,7 +1035,13 @@ export function AuthorizeCapabilitiesContent({
                 {capability.type === "transaction" && (
                   <TransactionCapabilityDetails
                     capability={capability as TransactionCapability}
+                    selectedKeys={
+                      txPermissions.get(index) ?? new Set<string>()
+                    }
                     contractMetadata={contractMetadata}
+                    onTogglePattern={(storageKey: string) =>
+                      handleTxPatternToggle(index, storageKey)
+                    }
                   />
                 )}
 
@@ -1043,39 +1057,30 @@ export function AuthorizeCapabilitiesContent({
         })}
       </List>
 
-      {/* Behavior Customization - Compact */}
+      {/* Behavior Customization */}
       <Box
         sx={{
-          mt: 1.5,
-          p: 1.5,
+          mt: compact ? 1 : 1.5,
+          p: compact ? 1 : 1.5,
           border: 1,
           borderColor: "divider",
           borderRadius: 1,
           bgcolor: "action.hover",
         }}
       >
-        <Typography
-          variant="caption"
-          fontWeight={600}
-          sx={{ display: "block", mb: 1 }}
-        >
-          Authorization Settings
-        </Typography>
-
-        <Box
-          sx={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            mb: 1,
-          }}
-        >
-          <Typography variant="caption" color="text.secondary">
-            {mode === "permissive"
-              ? "Allow ad-hoc requests"
-              : "Strict mode (only declared ops)"}
+        {!compact && (
+          <Typography variant="caption" fontWeight={600} sx={{ display: "block", mb: 1 }}>
+            Authorization Settings
           </Typography>
-          <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
+        )}
+
+        <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", mb: compact ? 0.5 : 1 }}>
+          {!compact && (
+            <Typography variant="caption" color="text.secondary">
+              {mode === "permissive" ? "Allow ad-hoc requests" : "Strict mode (only declared ops)"}
+            </Typography>
+          )}
+          <Box sx={{ display: "flex", alignItems: "center", gap: 0.5, ml: compact ? 0 : "auto" }}>
             <Typography
               variant="caption"
               color={mode === "permissive" ? "primary.main" : "text.secondary"}
@@ -1108,19 +1113,16 @@ export function AuthorizeCapabilitiesContent({
           type="number"
           value={durationDays}
           onChange={(e) => setDuration(parseInt(e.target.value) * 86400000)}
-          InputProps={{ sx: { fontSize: "0.875rem" } }}
-          InputLabelProps={{ sx: { fontSize: "0.875rem" } }}
+          InputProps={{ sx: { fontSize: compact ? "0.75rem" : "0.875rem" } }}
+          InputLabelProps={{ sx: { fontSize: compact ? "0.75rem" : "0.875rem" } }}
         />
       </Box>
 
-      <Typography
-        variant="caption"
-        color="text.secondary"
-        sx={{ mt: 1, display: "block", fontStyle: "italic" }}
-      >
-        Permissions persist for {durationDays} days and can be revoked from
-        settings.
-      </Typography>
+      {!compact && (
+        <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: "block", fontStyle: "italic" }}>
+          Permissions persist for {durationDays} days and can be revoked from settings.
+        </Typography>
+      )}
     </>
   );
 }

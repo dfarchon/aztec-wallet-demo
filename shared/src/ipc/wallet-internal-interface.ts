@@ -1,5 +1,5 @@
 import { Fr } from "@aztec/aztec.js/fields";
-import { type Wallet, WalletSchema, type GrantedCapability } from "@aztec/aztec.js/wallet";
+import { type Wallet, WalletSchema, type GrantedCapability, type AppCapabilities } from "@aztec/aztec.js/wallet";
 import { optional, schemas } from "@aztec/stdlib/schemas";
 import { z } from "zod";
 import { type ApiSchemaFor } from "@aztec/stdlib/schemas";
@@ -144,20 +144,20 @@ export type InternalWalletInterface = Omit<Wallet, "getAccounts"> & {
     | undefined
   >;
   resolveAuthorization(response: AuthorizationResponse): void;
-  onWalletUpdate(callback: OnWalletUpdateListener): void;
-  onAuthorizationRequest(callback: OnAuthorizationRequestListener): void;
+  onWalletUpdate(callback: OnWalletUpdateListener): () => void;
+  onAuthorizationRequest(callback: OnAuthorizationRequestListener): () => void;
   onProofDebugExportRequest: (
     callback: OnProofDebugExportRequestListener
   ) => void;
   // App authorization management
   listAuthorizedApps(): Promise<string[]>;
   getAppCapabilities(appId: string): Promise<GrantedCapability[]>;
-  getAppRequestedManifest(appId: string): Promise<any | undefined>;
+  getAppRequestedManifest(appId: string): Promise<{ manifest: AppCapabilities; contractNames: Record<string, string> } | undefined>;
   capabilityToStorageKeys(capability: GrantedCapability): Promise<string[]>;
   storeCapabilityGrants(
     appId: string,
-    manifest: any,
-    granted: GrantedCapability[]
+    granted: GrantedCapability[],
+    manifest?: AppCapabilities
   ): Promise<void>;
   updateAccountAuthorization(
     appId: string,
@@ -244,7 +244,7 @@ export const InternalWalletInterfaceSchema: ApiSchemaFor<InternalWalletInterface
     // @ts-ignore
     storeCapabilityGrants: z
       .function()
-      .args(z.string(), z.any(), z.array(z.any()))
+      .args(z.string(), z.array(z.any()), z.any().optional())
       .returns(z.void()),
     // @ts-ignore
     updateAccountAuthorization: z

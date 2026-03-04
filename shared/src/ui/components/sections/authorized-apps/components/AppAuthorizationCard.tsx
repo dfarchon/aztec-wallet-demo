@@ -32,6 +32,7 @@ export function AppAuthorizationCard({
   const { walletAPI } = useContext(WalletContext);
   const [capabilities, setCapabilities] = useState<GrantedCapability[]>([]);
   const [requestedManifest, setRequestedManifest] = useState<AppCapabilities | null>(null);
+  const [contractNames, setContractNames] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [revoking, setRevoking] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -54,12 +55,13 @@ export function AppAuthorizationCard({
   const loadCapabilities = async () => {
     try {
       setLoading(true);
-      const [caps, manifest] = await Promise.all([
+      const [caps, result] = await Promise.all([
         walletAPI.getAppCapabilities(appId),
         walletAPI.getAppRequestedManifest(appId),
       ]);
       setCapabilities(caps);
-      setRequestedManifest(manifest ?? null);
+      setRequestedManifest(result?.manifest ?? null);
+      setContractNames(result?.contractNames ?? {});
       console.log("[AppAuthorizationCard] Loaded capabilities:", caps);
     } catch (err) {
       console.error("Failed to load app capabilities:", err);
@@ -113,23 +115,13 @@ export function AppAuthorizationCard({
       try {
         setSaving(true);
 
-        // Create manifest for the granted capabilities
-        const manifest: AppCapabilities = {
-          version: "1.0" as typeof CAPABILITY_VERSION,
-          metadata: {
-            name: appId,
-            version: "1.0.0",
-          },
-          capabilities: data.granted,
-        };
-
         console.log("[AppAuthorizationCard] Calling storeCapabilityGrants with:", {
           appId,
           grantedCount: data.granted.length,
           granted: data.granted,
         });
 
-        await walletAPI.storeCapabilityGrants(appId, manifest, data.granted);
+        await walletAPI.storeCapabilityGrants(appId, data.granted);
         console.log("[AppAuthorizationCard] storeCapabilityGrants completed successfully");
       } catch (err) {
         console.error("[AppAuthorizationCard] Failed to save capabilities:", err);
@@ -180,7 +172,7 @@ export function AppAuthorizationCard({
         params: {
           manifest,
           newCapabilityIndices: [],
-          contractNames: {},
+          contractNames,
           existingGrants,
           isAppFirstTime: false,
         },
@@ -189,7 +181,7 @@ export function AppAuthorizationCard({
     };
 
     buildFakeRequest();
-  }, [loading, capabilities, requestedManifest, appId, walletAPI]);
+  }, [loading, capabilities, requestedManifest, contractNames, appId, walletAPI]);
 
   return (
     <Card sx={{ width: "100%", position: "relative" }}>

@@ -288,16 +288,16 @@ export function TxProgressTimeline({
     if (interaction.complete || !currentPhaseStartKey) return;
     const tick = () => {
       const now = Date.now();
-      // Fall back to interaction.timestamp for SIMULATING (it IS the simulation start)
       const phaseStart =
         phaseStartsRef.current.get(currentPhaseStartKey) ??
-        (currentPhaseKey === "SIMULATING" ? interaction.timestamp : now);
+        phaseStartsRef.current.get(`${interaction.id}:START`) ??
+        now;
       setPhaseElapsed(Math.max(0, now - phaseStart));
     };
     tick();
     const interval = setInterval(tick, 200);
     return () => clearInterval(interval);
-  }, [interaction.complete, currentPhaseStartKey, interaction.id, interaction.timestamp]);
+  }, [interaction.complete, currentPhaseStartKey, interaction.id]);
 
   // ── Completed state: use full PhaseTimeline with accurate measurements ──────
   if (interaction.complete) {
@@ -318,7 +318,8 @@ export function TxProgressTimeline({
   // Show the locked simulation segment so the user can see how long simulation took.
   if (!currentPhaseKey) {
     const simStart = phaseStartsRef.current.get(`${interaction.id}:SIMULATING`)
-      ?? interaction.timestamp;
+      ?? phaseStartsRef.current.get(`${interaction.id}:START`)
+      ?? Date.now();
     const simEnd = phaseStartsRef.current.get(`${interaction.id}:REQUESTING AUTHORIZATION`);
     if (!simEnd) return null;
     const simulationSegment: LivePhaseTiming = {
@@ -347,7 +348,7 @@ export function TxProgressTimeline({
       : phaseDefs[i + 1].statusKey;
     const endKey = `${interaction.id}:${endStatusKey}`;
     const start = phaseStartsRef.current.get(startKey)
-      ?? (phaseDefs[i].statusKey === "SIMULATING" ? interaction.timestamp : undefined);
+      ?? (phaseDefs[i].statusKey === "SIMULATING" ? phaseStartsRef.current.get(`${interaction.id}:START`) : undefined);
     const end = phaseStartsRef.current.get(endKey);
     if (start && end) {
       completedSegments.push({
