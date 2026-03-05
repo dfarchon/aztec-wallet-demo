@@ -44,14 +44,21 @@ jobs:
         working-directory: ./web
         run: vercel pull --yes --environment=production --token=${{ secrets.VERCEL_TOKEN }}
 
+      - name: Prepare prebuilt output
+        working-directory: ./web
+        run: |
+          mkdir -p .vercel/output
+          cp -r dist .vercel/output/static
+          cp vercel.json .vercel/output/config.json
+
       - name: Deploy to Vercel
         id: deploy
         working-directory: ./web
         run: |
           if [ "${{ github.event_name }}" == "push" ] && [ "${{ github.ref }}" == "refs/heads/main" ]; then
-            DEPLOY_URL=$(vercel deploy --prod --token=${{ secrets.VERCEL_TOKEN }} --archive=tgz --yes)
+            DEPLOY_URL=$(vercel deploy --prebuilt --prod --token=${{ secrets.VERCEL_TOKEN }} --archive=tgz --yes)
           else
-            DEPLOY_URL=$(vercel deploy --token=${{ secrets.VERCEL_TOKEN }} --archive=tgz --yes)
+            DEPLOY_URL=$(vercel deploy --prebuilt --token=${{ secrets.VERCEL_TOKEN }} --archive=tgz --yes)
           fi
           echo "url=$DEPLOY_URL" >> $GITHUB_OUTPUT
 
