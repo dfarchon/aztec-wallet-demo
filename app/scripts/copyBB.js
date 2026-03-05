@@ -37,7 +37,7 @@ function getPlatformArch() {
         return "arm64-linux";
       }
       console.error(
-        `✗ Unsupported Linux architecture: ${arch}. Only x64 and ARM64 are supported.`
+        `✗ Unsupported Linux architecture: ${arch}. Only x64 and ARM64 are supported.`,
       );
       process.exit(1);
     case "win32":
@@ -49,7 +49,7 @@ function getPlatformArch() {
   }
 
   console.error(
-    `✗ Unsupported architecture: ${arch} for platform: ${platform}`
+    `✗ Unsupported architecture: ${arch} for platform: ${platform}`,
   );
   process.exit(1);
 }
@@ -57,19 +57,19 @@ function getPlatformArch() {
 // Main function
 async function main() {
   // Source paths
-  const BB_FOLDER = path.resolve(__dirname, "../node_modules/@aztec/bb.js");
+  const BB_FOLDER = path.resolve(__dirname, "../../node_modules/@aztec/bb.js");
 
   const BB_WASM_SOURCE = path.join(
     BB_FOLDER,
-    "dest/node/barretenberg_wasm/barretenberg-threads.wasm.gz"
+    "dest/node/barretenberg_wasm/barretenberg-threads.wasm.gz",
   );
   const BB_NAPI_SOURCE = path.join(
     BB_FOLDER,
-    `build/${getPlatformArch()}/nodejs_module.node`
+    `build/${getPlatformArch()}/nodejs_module.node`,
   );
   const BB_BINARY_SOURCE = path.join(
     BB_FOLDER,
-    `build/${getPlatformArch()}/bb`
+    `build/${getPlatformArch()}/bb`,
   );
 
   // Destination directory - will be packaged with the app

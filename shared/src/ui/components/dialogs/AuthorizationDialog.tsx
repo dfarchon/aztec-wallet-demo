@@ -1,0 +1,603 @@
+import { useState, useEffect, useContext } from "react";
+import Dialog from "@mui/material/Dialog";
+import DialogTitle from "@mui/material/DialogTitle";
+import DialogContent from "@mui/material/DialogContent";
+import DialogActions from "@mui/material/DialogActions";
+import Button from "@mui/material/Button";
+import Typography from "@mui/material/Typography";
+import Box from "@mui/material/Box";
+import Accordion from "@mui/material/Accordion";
+import AccordionSummary from "@mui/material/AccordionSummary";
+import AccordionDetails from "@mui/material/AccordionDetails";
+import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
+import Checkbox from "@mui/material/Checkbox";
+import Chip from "@mui/material/Chip";
+import Card from "@mui/material/Card";
+import { Apps as AppsIcon, AccountCircle, Close as CloseIcon } from "@mui/icons-material";
+import IconButton from "@mui/material/IconButton";
+import type {
+  AuthorizationRequest,
+  AuthorizationItemResponse,
+  AuthorizationItem,
+} from "../../../wallet/types/authorization";
+import { AuthorizeSendTxContent } from "../authorization/AuthorizeSendTxContent";
+import { AuthorizeSimulateTxContent } from "../authorization/AuthorizeSimulateTxContent";
+import { AuthorizeContractContent } from "../authorization/AuthorizeContractContent";
+import { AuthorizeSenderContent } from "../authorization/AuthorizeSenderContent";
+import { AuthorizeAccountsContent } from "../authorization/AuthorizeAccountsContent";
+import { AuthorizeAddressBookContent } from "../authorization/AuthorizeAddressBookContent";
+import { AuthorizeCreateAuthWitContent } from "../authorization/AuthorizeCreateAuthWitContent";
+import { AuthorizePrivateEventsContent } from "../authorization/AuthorizePrivateEventsContent";
+import { AuthorizeContractMetadataContent } from "../authorization/AuthorizeContractMetadataContent";
+import { AuthorizeContractClassMetadataContent } from "../authorization/AuthorizeContractClassMetadataContent";
+import { AuthorizeCapabilitiesContent } from "../authorization/AuthorizeCapabilitiesContent";
+import { WalletContext } from "../../renderer";
+import { AztecAddress } from "@aztec/aztec.js/addresses";
+import { useTheme } from "@mui/material/styles";
+import useMediaQuery from "@mui/material/useMediaQuery";
+
+interface AuthorizationDialogProps {
+  request: AuthorizationRequest;
+  onApprove: (itemResponses: Record<string, AuthorizationItemResponse>) => void;
+  onDeny: () => void;
+  queueLength?: number;
+  wide?: boolean;
+}
+
+interface ItemState {
+  approved: boolean;
+  persistent: boolean;
+  data?: any; // Method-specific data (e.g., selected accounts for getAccounts)
+}
+
+function formatMethodName(method: string): string {
+  switch (method) {
+    case "sendTx":
+      return "Send Transaction";
+    case "simulateTx":
+      return "Simulate Transaction";
+    case "simulateUtility":
+      return "Simulate Utility Function";
+    case "registerContract":
+      return "Register Contract";
+    case "registerSender":
+      return "Register Sender";
+    case "getAccounts":
+      return "Get Accounts";
+    case "getAddressBook":
+      return "Get Address Book";
+    case "createAuthWit":
+      return "Create Authorization Witness";
+    case "getPrivateEvents":
+      return "Get Private Events";
+    case "getContractMetadata":
+      return "Get Contract Metadata";
+    case "getContractClassMetadata":
+      return "Get Contract Class Metadata";
+    case "requestCapabilities":
+      return "Request Capabilities";
+    default:
+      return method;
+  }
+}
+
+function getMethodSubtitle(item: AuthorizationItem): string | null {
+  switch (item.method) {
+    case "registerContract": {
+      const address = item.params.address || item.params.contractAddress;
+      const contractName = item.params.contractName;
+      if (contractName && contractName !== "Unknown Contract") {
+        return `${contractName} (${address ? address.substring(0, 10) + "..." : "unknown"})`;
+      }
+      return address ? address.substring(0, 16) + "..." : "Unknown contract";
+    }
+    case "registerSender":
+      return item.params.alias || item.params.address?.substring(0, 16) + "...";
+    case "getAccounts":
+      return "Access your wallet addresses";
+    case "getAddressBook":
+      return "Access your address book contacts";
+    case "createAuthWit": {
+      const params = item.params as any;
+      if (params.type === "hash") {
+        return "Sign message hash";
+      } else if (params.call) {
+        return `${params.call.contractName || "Contract"}::${params.call.function || "function"}`;
+      }
+      return "Create authorization witness";
+    }
+    case "getPrivateEvents": {
+      const params = item.params as any;
+      const eventName = params.eventName || "events";
+      const count = params.eventCount || 0;
+      return `Query ${count} ${eventName}`;
+    }
+    case "getContractMetadata": {
+      const params = item.params as any;
+      return params.contractName || params.address?.substring(0, 16) + "...";
+    }
+    case "getContractClassMetadata": {
+      const params = item.params as any;
+      return params.artifactName || params.contractClassId?.substring(0, 16) + "...";
+    }
+    case "sendTx": {
+      // Show the transaction title if available
+      const title = item.params.title;
+      return title || "Execute contract interaction";
+    }
+    case "simulateTx": {
+      // Show the precomputed title (filters out wallet calls, shows user-initiated calls)
+      const title = item.params.title;
+      if (title && title !== "Transaction") {
+        return title;
+      }
+      // Fallback to extracting from execution trace if title not available
+      const executionTrace = item.params.executionTrace;
+      if (executionTrace && typeof executionTrace === "object") {
+        const privateExecution = executionTrace.privateExecution;
+        if (privateExecution && typeof privateExecution === "object") {
+          const contractName = privateExecution.contract?.name || "Unknown";
+          const functionName = privateExecution.function || "unknown";
+          return `${contractName}::${functionName}`;
+        }
+      }
+      return "Simulate contract interaction";
+    }
+    case "simulateUtility": {
+      // Show utility function details if available
+      const executionTrace = item.params.executionTrace;
+      if (executionTrace && typeof executionTrace === "object") {
+        const contractName = executionTrace.contractName || "Unknown";
+        const functionName = executionTrace.functionName || "unknown";
+        return `${contractName}::${functionName}`;
+      }
+      return "Simulate utility function";
+    }
+    case "requestCapabilities": {
+      const manifest = item.params.manifest as any;
+      const numCapabilities = manifest?.capabilities?.length || 0;
+      return `Grant ${numCapabilities} capability type${numCapabilities !== 1 ? "s" : ""}`;
+    }
+    default:
+      return null;
+  }
+}
+
+export function AuthorizationDialog({
+  request,
+  onApprove,
+  onDeny,
+  queueLength = 1,
+  wide = false,
+}: AuthorizationDialogProps) {
+  const theme = useTheme();
+  const isSmall = useMediaQuery(theme.breakpoints.down("md"));
+  const { walletAPI } = useContext(WalletContext);
+  const items = request.items;
+  const [accountList, setAccountList] = useState<
+    Array<{ alias: string; item: AztecAddress }>
+  >([]);
+
+  // Load accounts for displaying "from" information
+  useEffect(() => {
+    const loadAccounts = async () => {
+      try {
+        const accounts = await walletAPI.getAccounts();
+        setAccountList(accounts);
+      } catch (err) {
+        console.error("Failed to load accounts:", err);
+      }
+    };
+    loadAccounts();
+  }, [walletAPI]);
+
+  const [itemStates, setItemStates] = useState<Map<string, ItemState>>(
+    new Map(
+      items.map((item) => [
+        item.id,
+        {
+          approved: true,
+          persistent:
+            item.method === "getAccounts" ||
+            item.method === "getAddressBook" ||
+            item.method === "simulateTx" ||
+            item.method === "simulateUtility" ||
+            item.method === "getPrivateEvents" ||
+            item.method === "getContractMetadata" ||
+            item.method === "getContractClassMetadata",
+          // Note: createAuthWit is intentionally NOT persistent
+        },
+      ])
+    )
+  );
+
+  // Reset state when request changes (new item from queue)
+  useEffect(() => {
+    setItemStates(
+      new Map(
+        items.map((item) => [
+          item.id,
+          {
+            approved: true,
+            persistent:
+              item.method === "getAccounts" ||
+              item.method === "getAddressBook" ||
+              item.method === "simulateTx" ||
+              item.method === "simulateUtility" ||
+              item.method === "getPrivateEvents" ||
+              item.method === "getContractMetadata" ||
+              item.method === "getContractClassMetadata",
+            // Note: createAuthWit is intentionally NOT persistent
+          },
+        ])
+      )
+    );
+  }, [request.id, items]); // Reset when request ID or items change
+
+  const handleToggleApproval = (itemId: string) => {
+    setItemStates((prev) => {
+      const newMap = new Map<string, ItemState>(prev);
+      const current = newMap.get(itemId);
+      if (!current) return prev;
+      newMap.set(itemId, { ...current, approved: !current.approved });
+      return newMap;
+    });
+  };
+
+  const handleItemDataChange = (itemId: string, data: any) => {
+    setItemStates((prev) => {
+      const newMap = new Map<string, ItemState>(prev);
+      const current = newMap.get(itemId);
+      if (!current) return prev;
+      newMap.set(itemId, { ...current, data });
+      return newMap;
+    });
+  };
+
+  const handleApprove = () => {
+    const itemResponses: Record<string, AuthorizationItemResponse> = {};
+
+    for (const item of items) {
+      const state = itemStates.get(item.id);
+
+      // Skip items that haven't been initialized yet
+      if (!state) {
+        continue;
+      }
+
+      itemResponses[item.id] = {
+        id: item.id,
+        approved: state.approved,
+        appId: item.appId,
+        data: state.data
+          ? {
+              ...state.data,
+              ...(state.persistent ? { persistent: true } : {}),
+            }
+          : state.persistent
+            ? ({ persistent: true } as any)
+            : undefined,
+      };
+    }
+
+    onApprove(itemResponses);
+  };
+
+  const approvedCount = Array.from(itemStates.values()).filter(
+    (s: ItemState) => s.approved
+  ).length;
+
+  return (
+    <Dialog open={true} fullScreen={isSmall} maxWidth={!isSmall && wide ? "lg" : "md"} fullWidth>
+      <DialogTitle sx={{ py: 1, px: { xs: 1.5, sm: 3 } }}>
+        <Box
+          sx={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+          }}
+        >
+          <Typography variant="subtitle1" fontWeight="bold">Authorization Request</Typography>
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+            {queueLength > 1 && (
+              <Typography
+                variant="caption"
+                sx={{
+                  bgcolor: "primary.main",
+                  color: "primary.contrastText",
+                  px: 1.5,
+                  py: 0.5,
+                  borderRadius: 1,
+                  fontWeight: "bold",
+                }}
+              >
+                {queueLength} pending
+              </Typography>
+            )}
+            <IconButton
+              edge="end"
+              color="inherit"
+              onClick={onDeny}
+              aria-label="close"
+              size="small"
+            >
+              <CloseIcon />
+            </IconButton>
+          </Box>
+        </Box>
+      </DialogTitle>
+      <DialogContent sx={{ px: { xs: 1.5, sm: 3 }, pt: 1 }}>
+        <Typography variant="body1" gutterBottom>
+          App <strong>{request.appId}</strong> is requesting to perform{" "}
+          {items.length} operation{items.length > 1 ? "s" : ""}:
+        </Typography>
+
+        <Box sx={{ mt: 2 }}>
+          {items.map((item, index) => {
+            const state = itemStates.get(item.id);
+
+            // Skip rendering if state hasn't been initialized yet
+            if (!state) {
+              return null;
+            }
+
+            return (
+              <Accordion
+                key={item.id}
+                defaultExpanded={items.length === 1}
+                sx={{
+                  mb: 1,
+                  border: state.approved ? "2px solid" : "1px solid",
+                  borderColor: state.approved ? "primary.main" : "divider",
+                  bgcolor: "background.paper",
+                }}
+              >
+                <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                  <Box
+                    sx={{ display: "flex", alignItems: "center", flexGrow: 1 }}
+                  >
+                    <Checkbox
+                      checked={state.approved}
+                      onChange={(e) => {
+                        e.stopPropagation();
+                        handleToggleApproval(item.id);
+                      }}
+                      onClick={(e) => e.stopPropagation()}
+                    />
+                    <Box>
+                      <Typography variant="subtitle1">
+                        {index + 1}. {formatMethodName(item.method)}
+                      </Typography>
+                      {getMethodSubtitle(item) && (
+                        <Typography variant="caption" color="text.secondary">
+                          {getMethodSubtitle(item)}
+                        </Typography>
+                      )}
+                    </Box>
+                  </Box>
+                </AccordionSummary>
+
+                <AccordionDetails sx={{ px: { xs: 1, sm: 2 }, pt: 1 }}>
+                  <Box>
+                    {/* Prominent info card for sendTx and simulateTx */}
+                    {(item.method === "sendTx" ||
+                      item.method === "simulateTx") &&
+                      item.params.from && (
+                        <Card
+                          sx={{
+                            mb: isSmall ? 1 : 2,
+                            bgcolor: "action.hover",
+                            border: isSmall ? "1px solid" : "2px solid",
+                            borderColor: "primary.main",
+                          }}
+                        >
+                          <Box sx={{ p: isSmall ? 0.75 : { xs: 1, sm: 2 } }}>
+                            <Box
+                              sx={{
+                                display: "flex",
+                                flexDirection: isSmall ? "row" : "column",
+                                flexWrap: "wrap",
+                                gap: isSmall ? 0.5 : 1,
+                                alignItems: isSmall ? "center" : undefined,
+                              }}
+                            >
+                              {/* App Info */}
+                              <Box
+                                sx={{
+                                  display: "flex",
+                                  alignItems: "center",
+                                  gap: 0.5,
+                                }}
+                              >
+                                <AppsIcon fontSize={isSmall ? "inherit" : "small"} color="primary" />
+                                {!isSmall && (
+                                  <Typography variant="body2" fontWeight="medium">
+                                    App:
+                                  </Typography>
+                                )}
+                                <Chip
+                                  label={request.appId}
+                                  size="small"
+                                  sx={{
+                                    fontWeight: 600,
+                                    bgcolor: "rgba(25, 118, 210, 0.08)",
+                                    color: "primary.main",
+                                    border: "1px solid",
+                                    borderColor: "primary.main",
+                                    ...(isSmall && { height: 18, fontSize: "0.65rem" }),
+                                  }}
+                                />
+                              </Box>
+                              {/* From Account Info */}
+                              {(() => {
+                                const fromAddress = item.params.from;
+                                const account = accountList.find((a) =>
+                                  a.item.equals(
+                                    AztecAddress.fromString(fromAddress)
+                                  )
+                                );
+                                const internalAlias =
+                                  account?.alias || "Unknown Account";
+                                const formattedAddress = fromAddress
+                                  ? `${fromAddress.slice(0, 10)}...${fromAddress.slice(-8)}`
+                                  : "Unknown";
+                                return (
+                                  <Box
+                                    sx={{
+                                      display: "flex",
+                                      alignItems: "center",
+                                      gap: 0.5,
+                                    }}
+                                  >
+                                    <AccountCircle
+                                      fontSize={isSmall ? "inherit" : "small"}
+                                      color="primary"
+                                    />
+                                    {!isSmall && (
+                                      <Typography variant="body2" fontWeight="medium">
+                                        From:
+                                      </Typography>
+                                    )}
+                                    <Typography
+                                      variant={isSmall ? "caption" : "body2"}
+                                      fontWeight="bold"
+                                    >
+                                      {internalAlias}
+                                    </Typography>
+                                    {!isSmall && (
+                                      <Typography
+                                        variant="caption"
+                                        sx={{
+                                          fontFamily: "monospace",
+                                          color: "text.secondary",
+                                        }}
+                                      >
+                                        ({formattedAddress})
+                                      </Typography>
+                                    )}
+                                  </Box>
+                                );
+                              })()}
+                            </Box>
+                          </Box>
+                        </Card>
+                      )}
+
+                    {item.method === "sendTx" && (
+                      <AuthorizeSendTxContent
+                        request={item}
+                        showAppId={false}
+                        compact={isSmall}
+                      />
+                    )}
+
+                    {(item.method === "simulateTx" ||
+                      item.method === "simulateUtility") && (
+                      <AuthorizeSimulateTxContent
+                        request={item}
+                        showAppId={false}
+                        compact={isSmall}
+                      />
+                    )}
+
+                    {item.method === "registerContract" && (
+                      <AuthorizeContractContent
+                        request={item}
+                        showAppId={false}
+                      />
+                    )}
+
+                    {item.method === "registerSender" && (
+                      <AuthorizeSenderContent
+                        request={item}
+                        showAppId={false}
+                      />
+                    )}
+
+                    {item.method === "getAccounts" && (
+                      <AuthorizeAccountsContent
+                        request={item}
+                        onAccountsChange={(accounts) => {
+                          handleItemDataChange(item.id, { accounts });
+                        }}
+                        showAppId={false}
+                      />
+                    )}
+
+                    {item.method === "getAddressBook" && (
+                      <AuthorizeAddressBookContent
+                        request={item}
+                        onContactsChange={(contacts) => {
+                          handleItemDataChange(item.id, { contacts });
+                        }}
+                        showAppId={false}
+                      />
+                    )}
+
+                    {item.method === "createAuthWit" && (
+                      <AuthorizeCreateAuthWitContent
+                        request={item}
+                        showAppId={false}
+                      />
+                    )}
+
+                    {item.method === "getPrivateEvents" && (
+                      <AuthorizePrivateEventsContent
+                        request={item}
+                        showAppId={false}
+                      />
+                    )}
+
+                    {item.method === "getContractMetadata" && (
+                      <AuthorizeContractMetadataContent
+                        request={item}
+                        showAppId={false}
+                      />
+                    )}
+
+                    {item.method === "getContractClassMetadata" && (
+                      <AuthorizeContractClassMetadataContent
+                        request={item}
+                        showAppId={false}
+                      />
+                    )}
+
+                    {item.method === "requestCapabilities" && (
+                      <AuthorizeCapabilitiesContent
+                        request={item}
+                        onCapabilitiesChange={(data) => {
+                          handleItemDataChange(item.id, data);
+                        }}
+                        showAppId={false}
+                        compact={isSmall}
+                      />
+                    )}
+                  </Box>
+                </AccordionDetails>
+              </Accordion>
+            );
+          })}
+        </Box>
+
+        <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
+          Review each operation above and select which ones you want to approve.
+          You can approve all, some, or none of the requested operations.
+        </Typography>
+      </DialogContent>
+
+      <DialogActions sx={{ px: { xs: 1.5, sm: 3 }, py: 1.5 }}>
+        <Button onClick={onDeny} color="error">
+          Deny All
+        </Button>
+        <Button
+          onClick={handleApprove}
+          color="primary"
+          variant="contained"
+          disabled={approvedCount === 0}
+        >
+          Approve Selected ({approvedCount})
+        </Button>
+      </DialogActions>
+    </Dialog>
+  );
+}

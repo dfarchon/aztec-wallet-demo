@@ -1,0 +1,42 @@
+{
+  "name": "@demo-wallet/shared",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./ui": "./src/ui.ts",
+    "./core": "./src/core.ts"
+  },
+  "dependencies": {
+    "@aztec/accounts": "v4.0.0-devnet.2-patch.3",
+    "@aztec/aztec.js": "v4.0.0-devnet.2-patch.3",
+    "@aztec/constants": "v4.0.0-devnet.2-patch.3",
+    "@aztec/entrypoints": "v4.0.0-devnet.2-patch.3",
+    "@aztec/foundation": "v4.0.0-devnet.2-patch.3",
+    "@aztec/kv-store": "v4.0.0-devnet.2-patch.3",
+    "@aztec/noir-contracts.js": "v4.0.0-devnet.2-patch.3",
+    "@aztec/protocol-contracts": "v4.0.0-devnet.2-patch.3",
+    "@aztec/pxe": "v4.0.0-devnet.2-patch.3",
+    "@aztec/stdlib": "v4.0.0-devnet.2-patch.3",
+    "@aztec/wallet-sdk": "v4.0.0-devnet.2-patch.3",
+    "@emotion/react": "^11.14.0",
+    "@emotion/styled": "^11.14.0",
+    "@fontsource/roboto": "^5.1.1",
+    "@mui/icons-material": "^6.4.4",
+    "@mui/lab": "^6.0.0-beta.27",
+    "@mui/material": "^6.4.4",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-qr-code": "^2.0.18",
+    "zod": "^3.23.8"
+  },
+  "scripts": {
+    "test": "vitest"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.1",
+    "@types/react-dom": "^18.3.1",
+    "typescript": "~5.6.2",
+    "vitest": "^3.0.0"
+  }
+}

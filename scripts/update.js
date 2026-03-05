@@ -57,7 +57,7 @@ async function fetchLatestNightly() {
 }
 
 function getNodeUrlFromConfig(networkId) {
-  const networksFile = resolve(ROOT, "app/src/config/networks.ts");
+  const networksFile = resolve(ROOT, "shared/src/config/networks.ts");
   const content = readFileSync(networksFile, "utf-8");
 
   const lines = content.split("\n");
@@ -108,30 +108,35 @@ function updatePackageJson(path, version) {
 }
 
 function updateAppPackageJson(version) {
-  log(COLORS.yellow, "[1/4] Updating app/package.json...");
+  log(COLORS.yellow, "[1/5] Updating app/package.json...");
   updatePackageJson(resolve(ROOT, "app/package.json"), version);
   log(COLORS.green, "✓ app/package.json updated\n");
 }
 
+function updateSharedPackageJson(version) {
+  log(COLORS.yellow, "[2/5] Updating shared/package.json...");
+  updatePackageJson(resolve(ROOT, "shared/package.json"), version);
+  log(COLORS.green, "✓ shared/package.json updated\n");
+}
+
 function updateExtensionPackageJson(version) {
-  log(COLORS.yellow, "[2/4] Updating extension/package.json...");
+  log(COLORS.yellow, "[3/5] Updating extension/package.json...");
   updatePackageJson(resolve(ROOT, "extension/package.json"), version);
   log(COLORS.green, "✓ extension/package.json updated\n");
 }
 
 function installDependencies() {
-  log(COLORS.yellow, "[3/4] Running yarn install in app/ and extension/...");
-  exec("yarn install", { cwd: resolve(ROOT, "app") });
-  exec("yarn install", { cwd: resolve(ROOT, "extension") });
+  log(COLORS.yellow, "[4/5] Running yarn install from root...");
+  exec("yarn install", { cwd: ROOT });
   log(COLORS.green, "✓ Dependencies installed\n");
 }
 
 function updateRollupVersion(networkId, rollupVersion) {
   log(
     COLORS.yellow,
-    `[4/4] Updating ${networkId} rollup version to ${rollupVersion}...`,
+    `[5/5] Updating ${networkId} rollup version to ${rollupVersion}...`,
   );
-  const networksFile = resolve(ROOT, "app/src/config/networks.ts");
+  const networksFile = resolve(ROOT, "shared/src/config/networks.ts");
   let content = readFileSync(networksFile, "utf-8");
 
   // Find the network config and update its version
@@ -209,6 +214,7 @@ async function main() {
 
   // Run update steps
   updateAppPackageJson(version);
+  updateSharedPackageJson(version);
   updateExtensionPackageJson(version);
   installDependencies();
   updateRollupVersion(network, rollupVersion);

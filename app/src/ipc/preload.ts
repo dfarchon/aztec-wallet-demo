@@ -5,7 +5,7 @@ import type { TxHash, TxReceipt } from "@aztec/stdlib/tx";
 import type {
   WalletInteraction,
   WalletInteractionType,
-} from "../wallet/types/wallet-interaction";
+} from "@demo-wallet/shared/core";
 
 contextBridge.exposeInMainWorld("walletAPI", {
   getTxReceipt(stringifiedArgs: string): Promise<TxReceipt> {
@@ -35,14 +35,20 @@ contextBridge.exposeInMainWorld("walletAPI", {
   listAuthorizedApps(stringifiedArgs: string): Promise<string[]> {
     return ipcRenderer.invoke("listAuthorizedApps", stringifiedArgs);
   },
-  getAppCapabilities(stringifiedArgs: string): Promise<any[]> {
+  getAppCapabilities(stringifiedArgs: string): Promise<any> {
     return ipcRenderer.invoke("getAppCapabilities", stringifiedArgs);
+  },
+  resolveContractNames(stringifiedArgs: string): Promise<Record<string, string>> {
+    return ipcRenderer.invoke("resolveContractNames", stringifiedArgs);
   },
   capabilityToStorageKeys(stringifiedArgs: string): Promise<string[]> {
     return ipcRenderer.invoke("capabilityToStorageKeys", stringifiedArgs);
   },
   storeCapabilityGrants(stringifiedArgs: string): Promise<void> {
     return ipcRenderer.invoke("storeCapabilityGrants", stringifiedArgs);
+  },
+  revokeCapability(stringifiedArgs: string): Promise<void> {
+    return ipcRenderer.invoke("revokeCapability", stringifiedArgs);
   },
   updateAccountAuthorization(stringifiedArgs: string): Promise<void> {
     return ipcRenderer.invoke("updateAccountAuthorization", stringifiedArgs);
@@ -57,14 +63,14 @@ contextBridge.exposeInMainWorld("walletAPI", {
     return ipcRenderer.invoke("revokeAppAuthorizations", stringifiedArgs);
   },
   onWalletUpdate(callback) {
-    return ipcRenderer.on("wallet-update", (_event, eventData) =>
-      callback(eventData)
-    );
+    const listener = (_event: any, eventData: any) => callback(eventData);
+    ipcRenderer.on("wallet-update", listener);
+    return () => ipcRenderer.off("wallet-update", listener);
   },
   onAuthorizationRequest(callback) {
-    return ipcRenderer.on("authorization-request", (_event, eventData) =>
-      callback(eventData)
-    );
+    const listener = (_event: any, eventData: any) => callback(eventData);
+    ipcRenderer.on("authorization-request", listener);
+    return () => ipcRenderer.off("authorization-request", listener);
   },
   resolveAuthorization(stringifiedArgs: string) {
     return ipcRenderer.invoke("resolveAuthorization", stringifiedArgs);

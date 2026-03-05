@@ -27,10 +27,10 @@ const ROOT = resolve(__dirname, "..");
 const SAVED_PATH_FILE = resolve(ROOT, ".local-aztec-path");
 
 // Package.json files to modify (relative to repo root)
-const PACKAGE_FILES = ["app/package.json", "extension/package.json"];
+const PACKAGE_FILES = ["app/package.json", "shared/package.json", "extension/package.json"];
 
 // Directories containing package.json files (for yarn install)
-const PACKAGE_DIRS = ["app", "extension"];
+const PACKAGE_DIRS = ["app", "shared", "extension"];
 
 // Mapping of @aztec/* packages to their paths within aztec-packages
 const PACKAGE_MAPPINGS = {
