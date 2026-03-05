@@ -38,3 +38,4 @@ src/config/networks/local.json
 contracts/codegenCache.json
 .vercel
 .local-aztec-path
+.env*.local
