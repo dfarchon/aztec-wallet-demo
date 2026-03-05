@@ -12,10 +12,14 @@
 
 import { StrictMode, useMemo, useState, useEffect, useRef, useCallback } from "react";
 import {
+  Box,
+  Button,
   createTheme,
   CssBaseline,
+  Link,
   type ThemeOptions,
   ThemeProvider,
+  Typography,
   Dialog,
 } from "@mui/material";
 import {
@@ -191,13 +195,86 @@ function IframeContent() {
   );
 }
 
+/**
+ * Gate component that ensures the iframe has storage access before rendering children.
+ * Required for cross-origin iframes to access their own IndexedDB.
+ */
+function StorageAccessGate({ children }: { children: React.ReactNode }) {
+  const [state, setState] = useState<"checking" | "granted" | "needs-grant" | "needs-visit">("checking");
+
+  useEffect(() => {
+    // Not in an iframe or API not available — skip the gate
+    if (window.self === window.top || !document.hasStorageAccess) {
+      setState("granted");
+      return;
+    }
+    document.hasStorageAccess().then((has) => {
+      setState(has ? "granted" : "needs-grant");
+    });
+  }, []);
+
+  const requestAccess = async () => {
+    try {
+      await document.requestStorageAccess();
+      setState("granted");
+    } catch {
+      // Browser denied — likely user has never visited this origin
+      setState("needs-visit");
+    }
+  };
+
+  const retry = async () => {
+    const has = await document.hasStorageAccess();
+    if (has) {
+      setState("granted");
+    } else {
+      setState("needs-grant");
+    }
+  };
+
+  if (state === "checking") return null;
+  if (state === "granted") return <>{children}</>;
+
+  return (
+    <Box sx={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100vh", gap: 2, p: 3, textAlign: "center" }}>
+      <CssBaseline />
+      <Typography variant="h6">Aztec Web Demo Wallet</Typography>
+      {state === "needs-grant" && (
+        <>
+          <Typography variant="body2" color="text.secondary">
+            This wallet needs access to its storage to function.
+          </Typography>
+          <Button variant="contained" onClick={requestAccess}>
+            Authorize Storage Access
+          </Button>
+        </>
+      )}
+      {state === "needs-visit" && (
+        <>
+          <Typography variant="body2" color="text.secondary">
+            Your browser requires you to visit the wallet site directly before it can be used in an iframe.
+          </Typography>
+          <Link href={window.location.origin} target="_blank" rel="noopener">
+            Open wallet in a new tab
+          </Link>
+          <Button variant="outlined" onClick={retry} sx={{ mt: 1 }}>
+            Retry
+          </Button>
+        </>
+      )}
+    </Box>
+  );
+}
+
 export function IframeShell() {
   return (
     <StrictMode>
       <ThemeProvider theme={theme}>
-        <NetworkProvider>
-          <IframeContent />
-        </NetworkProvider>
+        <StorageAccessGate>
+          <NetworkProvider>
+            <IframeContent />
+          </NetworkProvider>
+        </StorageAccessGate>
       </ThemeProvider>
     </StrictMode>
   );
