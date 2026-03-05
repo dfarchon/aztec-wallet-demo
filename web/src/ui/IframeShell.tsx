@@ -5,6 +5,7 @@
  * 1. Start the IframeConnectionHandler to handle postMessage protocol
  * 2. Show authorization dialogs when dApp requests require user approval
  * 3. Auto-approve discovery for the prototype (can be replaced with UI later)
+ * 4. Request storage access before IndexedDB operations (cross-origin requirement)
  *
  * The shell is minimal — no navigation, no account management — just the
  * authorization flow that requires wallet-side user interaction.
@@ -43,6 +44,23 @@ import { getOrCreateSession } from "../wallet/wallet-service.ts";
 import { EmojiVerification } from "./components/EmojiVerification.tsx";
 import { Fr } from "@aztec/aztec.js/fields";
 
+/**
+ * Ensure this iframe has unpartitioned storage access (needed for IndexedDB in
+ * cross-origin iframes). Returns true if access is already granted or we're not
+ * in an iframe. If access isn't granted yet, it resolves the returned promise
+ * only after the user clicks "Authorize" in the gate UI.
+ */
+async function ensureStorageAccess(
+  requestGrant: () => Promise<void>,
+): Promise<void> {
+  // Not in an iframe or API unavailable — nothing to do
+  if (window.self === window.top || !document.hasStorageAccess) return;
+  const has = await document.hasStorageAccess();
+  if (has) return;
+  // Need a user gesture — delegate to the UI and wait
+  await requestGrant();
+}
+
 const themeOptions: ThemeOptions = {
   breakpoints: {
     values: {
@@ -65,6 +83,8 @@ const themeOptions: ThemeOptions = {
 };
 const theme = createTheme(themeOptions);
 
+type StorageAccessState = "idle" | "needs-grant" | "needs-visit";
+
 function IframeContent() {
   const { currentNetwork } = useNetwork();
   const chainInfo = networkToChainInfo(currentNetwork);
@@ -84,6 +104,41 @@ function IframeContent() {
   const clearVerificationHashRef = useRef(clearVerificationHash);
   useEffect(() => { clearVerificationHashRef.current = clearVerificationHash; }, [clearVerificationHash]);
 
+  // Storage access gate state — shown as an overlay when the dApp tries to use the wallet
+  // but the iframe doesn't have unpartitioned storage yet.
+  const [storageAccess, setStorageAccess] = useState<StorageAccessState>("idle");
+  // Resolve function from the pending ensureStorageAccess promise
+  const storageGrantResolveRef = useRef<(() => void) | null>(null);
+
+  const requestStorageGrant = useCallback((): Promise<void> => {
+    return new Promise((resolve) => {
+      storageGrantResolveRef.current = resolve;
+      setStorageAccess("needs-grant");
+    });
+  }, []);
+
+  const handleGrantClick = useCallback(async () => {
+    try {
+      await document.requestStorageAccess();
+      setStorageAccess("idle");
+      storageGrantResolveRef.current?.();
+      storageGrantResolveRef.current = null;
+    } catch {
+      setStorageAccess("needs-visit");
+    }
+  }, []);
+
+  const handleRetryClick = useCallback(async () => {
+    const has = await document.hasStorageAccess();
+    if (has) {
+      setStorageAccess("idle");
+      storageGrantResolveRef.current?.();
+      storageGrantResolveRef.current = null;
+    } else {
+      setStorageAccess("needs-grant");
+    }
+  }, []);
+
   // Stable callback ref so the IframeConnectionHandler closure always has the latest setter
   const enqueueAuthRequest = useCallback((request: AuthorizationRequest) => {
     setAuthQueue((prev) => {
@@ -94,7 +149,13 @@ function IframeContent() {
   const enqueueAuthRef = useRef(enqueueAuthRequest);
   useEffect(() => { enqueueAuthRef.current = enqueueAuthRequest; }, [enqueueAuthRequest]);
 
-  // Start the IframeConnectionHandler when the component mounts
+  const requestStorageGrantRef = useRef(requestStorageGrant);
+  useEffect(() => { requestStorageGrantRef.current = requestStorageGrant; }, [requestStorageGrant]);
+
+  // Start the IframeConnectionHandler when the component mounts.
+  // The handler starts immediately (posts WALLET_READY for discovery).
+  // Storage access is requested lazily inside getExternalWallet, right before
+  // IndexedDB is opened.
   useEffect(() => {
     const config: IframeConnectionConfig = {
       walletId: "demo-web-wallet",
@@ -116,6 +177,10 @@ function IframeContent() {
       getExternalWallet: async (appId, chainInfo) => {
         // First real wallet message arrived — emoji verification phase is over
         clearVerificationHashRef.current();
+
+        // Ensure we have unpartitioned storage before touching IndexedDB
+        await ensureStorageAccess(() => requestStorageGrantRef.current());
+
         // chainInfo arrives JSON-deserialized — chainId/version are hex strings
         // (Fr.toJSON() returns toString() = hex), not Fr instances. Reconstruct them.
         const rawChainId = (chainInfo as any).chainId;
@@ -182,6 +247,35 @@ function IframeContent() {
       <Dialog open={!!verificationHash} fullScreen>
         <EmojiVerification verificationHash={verificationHash ?? ""} />
       </Dialog>
+      {/* Overlay: storage access gate (shown when dApp connects but storage is partitioned) */}
+      <Dialog open={storageAccess !== "idle"} fullScreen>
+        <Box sx={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100vh", gap: 2, p: 3, textAlign: "center" }}>
+          <Typography variant="h6">Aztec Web Demo Wallet</Typography>
+          {storageAccess === "needs-grant" && (
+            <>
+              <Typography variant="body2" color="text.secondary">
+                This wallet needs access to its storage to function.
+              </Typography>
+              <Button variant="contained" onClick={handleGrantClick}>
+                Authorize Storage Access
+              </Button>
+            </>
+          )}
+          {storageAccess === "needs-visit" && (
+            <>
+              <Typography variant="body2" color="text.secondary">
+                Your browser requires you to visit the wallet site directly before it can be used in an iframe.
+              </Typography>
+              <Link href={window.location.origin} target="_blank" rel="noopener">
+                Open wallet in a new tab
+              </Link>
+              <Button variant="outlined" onClick={handleRetryClick} sx={{ mt: 1 }}>
+                Retry
+              </Button>
+            </>
+          )}
+        </Box>
+      </Dialog>
       {/* Overlay: dApp authorization requests */}
       {currentAuth && (
         <AuthorizationDialog
@@ -195,86 +289,13 @@ function IframeContent() {
   );
 }
 
-/**
- * Gate component that ensures the iframe has storage access before rendering children.
- * Required for cross-origin iframes to access their own IndexedDB.
- */
-function StorageAccessGate({ children }: { children: React.ReactNode }) {
-  const [state, setState] = useState<"checking" | "granted" | "needs-grant" | "needs-visit">("checking");
-
-  useEffect(() => {
-    // Not in an iframe or API not available — skip the gate
-    if (window.self === window.top || !document.hasStorageAccess) {
-      setState("granted");
-      return;
-    }
-    document.hasStorageAccess().then((has) => {
-      setState(has ? "granted" : "needs-grant");
-    });
-  }, []);
-
-  const requestAccess = async () => {
-    try {
-      await document.requestStorageAccess();
-      setState("granted");
-    } catch {
-      // Browser denied — likely user has never visited this origin
-      setState("needs-visit");
-    }
-  };
-
-  const retry = async () => {
-    const has = await document.hasStorageAccess();
-    if (has) {
-      setState("granted");
-    } else {
-      setState("needs-grant");
-    }
-  };
-
-  if (state === "checking") return null;
-  if (state === "granted") return <>{children}</>;
-
-  return (
-    <Box sx={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100vh", gap: 2, p: 3, textAlign: "center" }}>
-      <CssBaseline />
-      <Typography variant="h6">Aztec Web Demo Wallet</Typography>
-      {state === "needs-grant" && (
-        <>
-          <Typography variant="body2" color="text.secondary">
-            This wallet needs access to its storage to function.
-          </Typography>
-          <Button variant="contained" onClick={requestAccess}>
-            Authorize Storage Access
-          </Button>
-        </>
-      )}
-      {state === "needs-visit" && (
-        <>
-          <Typography variant="body2" color="text.secondary">
-            Your browser requires you to visit the wallet site directly before it can be used in an iframe.
-          </Typography>
-          <Link href={window.location.origin} target="_blank" rel="noopener">
-            Open wallet in a new tab
-          </Link>
-          <Button variant="outlined" onClick={retry} sx={{ mt: 1 }}>
-            Retry
-          </Button>
-        </>
-      )}
-    </Box>
-  );
-}
-
 export function IframeShell() {
   return (
     <StrictMode>
       <ThemeProvider theme={theme}>
-        <StorageAccessGate>
-          <NetworkProvider>
-            <IframeContent />
-          </NetworkProvider>
-        </StorageAccessGate>
+        <NetworkProvider>
+          <IframeContent />
+        </NetworkProvider>
       </ThemeProvider>
     </StrictMode>
   );
