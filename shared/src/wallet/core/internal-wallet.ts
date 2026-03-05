@@ -5,7 +5,6 @@ import {
   type DeployAccountOptions,
   type SendOptions,
   type GrantedCapability,
-  type AppCapabilities,
   type ContractsCapability,
   type Capability,
 } from "@aztec/aztec.js/wallet";
@@ -314,68 +313,26 @@ export class InternalWallet extends BaseNativeWallet {
     return await this.db.listAuthorizedApps();
   }
 
-  async getAppCapabilities(appId: string): Promise<GrantedCapability[]> {
-    return await this.db.reconstructCapabilitiesFromKeys(appId);
+  async getAppCapabilities(
+    appId: string,
+  ): Promise<{ requested: GrantedCapability[]; granted: GrantedCapability[] }> {
+    const [requested, granted] = await Promise.all([
+      this.db.getRequestedCapabilities(appId),
+      this.db.reconstructCapabilitiesFromKeys(appId),
+    ]);
+    return { requested, granted };
   }
 
-  async getAppRequestedManifest(
-    appId: string,
-  ): Promise<
-    | { manifest: AppCapabilities; contractNames: Record<string, string> }
-    | undefined
-  > {
-    const manifest = await this.db.getRequestedManifest(appId);
-    if (!manifest) return undefined;
-
-    // Collect all contract addresses from all capabilities — same as request-capabilities-operation
-    const contractAddresses = new Set<string>();
-    for (const capability of manifest.capabilities) {
-      if (capability.type === "contracts") {
-        const cap = capability as any;
-        if (cap.contracts !== "*") {
-          for (const addr of cap.contracts)
-            contractAddresses.add(addr.toString());
-        }
-      } else if (capability.type === "simulation") {
-        const cap = capability as any;
-        for (const pattern of cap.transactions?.scope !== "*"
-          ? cap.transactions?.scope || []
-          : []) {
-          if (pattern.contract !== "*")
-            contractAddresses.add(pattern.contract.toString());
-        }
-        for (const pattern of cap.utilities?.scope !== "*"
-          ? cap.utilities?.scope || []
-          : []) {
-          if (pattern.contract !== "*")
-            contractAddresses.add(pattern.contract.toString());
-        }
-      } else if (capability.type === "transaction") {
-        const cap = capability as any;
-        if (cap.scope !== "*") {
-          for (const pattern of cap.scope) {
-            if (pattern.contract !== "*")
-              contractAddresses.add(pattern.contract.toString());
-          }
-        }
-      } else if (capability.type === "data") {
-        const cap = capability as any;
-        if (cap.privateEvents?.contracts !== "*") {
-          for (const addr of cap.privateEvents?.contracts || [])
-            contractAddresses.add(addr.toString());
-        }
-      }
-    }
-
-    const contractNames: Record<string, string> = {};
-    for (const addrStr of contractAddresses) {
-      const name = await this.decodingCache.getAddressAlias(
+  async resolveContractNames(
+    addresses: string[],
+  ): Promise<Record<string, string>> {
+    const result: Record<string, string> = {};
+    for (const addrStr of addresses) {
+      result[addrStr] = await this.decodingCache.getAddressAlias(
         AztecAddress.fromString(addrStr),
       );
-      contractNames[addrStr] = name;
     }
-
-    return { manifest, contractNames };
+    return result;
   }
 
   async capabilityToStorageKeys(
@@ -387,9 +344,16 @@ export class InternalWallet extends BaseNativeWallet {
   async storeCapabilityGrants(
     appId: string,
     granted: GrantedCapability[],
-    manifest?: AppCapabilities,
+    requestedCapabilities?: GrantedCapability[],
   ): Promise<void> {
-    await this.db.storeCapabilityGrants(appId, granted, manifest);
+    await this.db.storeCapabilityGrants(appId, granted, requestedCapabilities);
+  }
+
+  async revokeCapability(
+    appId: string,
+    capability: GrantedCapability,
+  ): Promise<void> {
+    await this.db.revokeCapability(appId, capability);
   }
 
   async updateAccountAuthorization(

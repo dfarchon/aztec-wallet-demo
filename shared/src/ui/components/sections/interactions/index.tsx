@@ -106,7 +106,7 @@ const getInteractionTypeColor = (type: WalletInteractionType) => {
     registerSender: "#444444", // dark gray
     getAccounts: "#4caf50", // green (data access)
     getAddressBook: "#4caf50", // green (data access)
-    createAuthWit: "#f44336", // red (security critical)
+    createAuthWit: "#009688", // teal (signature action)
     getPrivateEvents: "#ff9800", // orange (privacy sensitive)
     getContractMetadata: "#03a9f4", // light blue (metadata query)
     getContractClassMetadata: "#03a9f4", // light blue (metadata query)

@@ -31,7 +31,6 @@ export type AccountSelection = {
   alias: string;
   originalAlias: string;
   selected: boolean;
-  allowAuthWit: boolean;
 };
 
 export type CheckState = {

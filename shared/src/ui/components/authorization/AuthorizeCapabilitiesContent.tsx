@@ -128,8 +128,6 @@ export function AuthorizeCapabilitiesContent({
       const accountsCap = manifest.capabilities.find(
         (cap) => cap.type === "accounts",
       ) as AccountsCapability | undefined;
-      const shouldEnableAuthWit = accountsCap?.canCreateAuthWit ?? false;
-
       // Build the set of previously-granted account addresses (from the capability's accounts list)
       const grantedAddresses = new Set<string>(
         (accountsCap as any)?.accounts?.map((a: Aliased<AztecAddress>) => a.item.toString()) ?? [],
@@ -149,7 +147,6 @@ export function AuthorizeCapabilitiesContent({
             : grantedAddresses.size > 0
               ? grantedAddresses.has(acc.item.toString())
               : hasGetAccountsGrant,
-          allowAuthWit: shouldEnableAuthWit, // Enable if manifest requests it
         })),
       );
 
@@ -253,15 +250,11 @@ export function AuthorizeCapabilitiesContent({
 
         if (selectedAccs.length > 0) {
           const accountsCap = capability as AccountsCapability;
-          // Determine if any selected account has authwit enabled
-          const anyAuthWit = accounts.some(
-            (acc) => acc.selected && acc.allowAuthWit,
-          );
 
           granted.push({
             type: "accounts",
             canGet: accountsCap.canGet,
-            canCreateAuthWit: anyAuthWit ? accountsCap.canCreateAuthWit : false,
+            canCreateAuthWit: accountsCap.canCreateAuthWit,
             accounts: selectedAccs,
           });
         }
@@ -688,13 +681,6 @@ export function AuthorizeCapabilitiesContent({
     );
   };
 
-  const handleToggleAuthWit = (index: number) => {
-    setAccounts((prev) =>
-      prev.map((acc, i) =>
-        i === index ? { ...acc, allowAuthWit: !acc.allowAuthWit } : acc,
-      ),
-    );
-  };
 
   const handleAliasChange = (index: number, newAlias: string) => {
     setAccounts((prev) =>
@@ -962,10 +948,9 @@ export function AuthorizeCapabilitiesContent({
                 {/* Accounts Capability */}
                 {isAccountsCapability && (
                   <AccountsCapabilityDetails
-                    capability={capability as AccountsCapability}
                     accounts={accounts}
+                    canCreateAuthWit={(capability as AccountsCapability).canCreateAuthWit ?? false}
                     onToggleAccount={handleToggleAccount}
-                    onToggleAuthWit={handleToggleAuthWit}
                     onAliasChange={handleAliasChange}
                   />
                 )}

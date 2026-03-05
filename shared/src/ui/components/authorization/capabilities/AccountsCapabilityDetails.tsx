@@ -3,25 +3,32 @@ import Typography from "@mui/material/Typography";
 import Checkbox from "@mui/material/Checkbox";
 import FormControlLabel from "@mui/material/FormControlLabel";
 import TextField from "@mui/material/TextField";
-import type { AccountSelection, AccountsCapability } from "./types";
+import InfoOutlinedIcon from "@mui/icons-material/InfoOutlined";
+import type { AccountSelection } from "./types";
 
 interface AccountsCapabilityDetailsProps {
-  capability: AccountsCapability;
   accounts: AccountSelection[];
+  canCreateAuthWit: boolean;
   onToggleAccount: (index: number) => void;
-  onToggleAuthWit: (index: number) => void;
   onAliasChange: (index: number, alias: string) => void;
 }
 
 export function AccountsCapabilityDetails({
-  capability,
   accounts,
+  canCreateAuthWit,
   onToggleAccount,
-  onToggleAuthWit,
   onAliasChange,
 }: AccountsCapabilityDetailsProps) {
   return (
     <Box>
+      {canCreateAuthWit && (
+        <Box sx={{ display: "flex", alignItems: "center", gap: 0.5, mb: 1, color: "text.secondary" }}>
+          <InfoOutlinedIcon sx={{ fontSize: "1rem" }} />
+          <Typography variant="caption">
+            This app may request auth witnesses (each request will require approval)
+          </Typography>
+        </Box>
+      )}
       {accounts.map((account, accIndex) => (
         <Box
           key={account.address}
@@ -67,20 +74,6 @@ export function AccountsCapabilityDetails({
           />
           {account.selected && (
             <Box sx={{ pl: 3.5, mt: 0.5 }}>
-              <FormControlLabel
-                control={
-                  <Checkbox
-                    size="small"
-                    checked={account.allowAuthWit}
-                    onChange={() => onToggleAuthWit(accIndex)}
-                    disabled={!capability.canCreateAuthWit}
-                  />
-                }
-                label={
-                  <Typography variant="caption">Allow auth witnesses</Typography>
-                }
-                sx={{ m: 0 }}
-              />
               <TextField
                 size="small"
                 value={account.alias}

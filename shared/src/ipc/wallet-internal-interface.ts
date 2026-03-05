@@ -1,5 +1,5 @@
 import { Fr } from "@aztec/aztec.js/fields";
-import { type Wallet, WalletSchema, type GrantedCapability, type AppCapabilities } from "@aztec/aztec.js/wallet";
+import { type Wallet, WalletSchema, type GrantedCapability } from "@aztec/aztec.js/wallet";
 import { optional, schemas } from "@aztec/stdlib/schemas";
 import { z } from "zod";
 import { type ApiSchemaFor } from "@aztec/stdlib/schemas";
@@ -151,13 +151,20 @@ export type InternalWalletInterface = Omit<Wallet, "getAccounts"> & {
   ) => void;
   // App authorization management
   listAuthorizedApps(): Promise<string[]>;
-  getAppCapabilities(appId: string): Promise<GrantedCapability[]>;
-  getAppRequestedManifest(appId: string): Promise<{ manifest: AppCapabilities; contractNames: Record<string, string> } | undefined>;
+  getAppCapabilities(appId: string): Promise<{
+    requested: GrantedCapability[];
+    granted: GrantedCapability[];
+  }>;
+  resolveContractNames(addresses: string[]): Promise<Record<string, string>>;
   capabilityToStorageKeys(capability: GrantedCapability): Promise<string[]>;
   storeCapabilityGrants(
     appId: string,
     granted: GrantedCapability[],
-    manifest?: AppCapabilities
+    requestedCapabilities?: GrantedCapability[]
+  ): Promise<void>;
+  revokeCapability(
+    appId: string,
+    capability: GrantedCapability
   ): Promise<void>;
   updateAccountAuthorization(
     appId: string,
@@ -230,12 +237,17 @@ export const InternalWalletInterfaceSchema: ApiSchemaFor<InternalWalletInterface
     getAppCapabilities: z
       .function()
       .args(z.string())
-      .returns(z.array(z.any())),
+      .returns(
+        z.object({
+          requested: z.array(z.any()),
+          granted: z.array(z.any()),
+        }),
+      ),
     // @ts-ignore
-    getAppRequestedManifest: z
+    resolveContractNames: z
       .function()
-      .args(z.string())
-      .returns(z.any().optional()),
+      .args(z.array(z.string()))
+      .returns(z.record(z.string())),
     // @ts-ignore
     capabilityToStorageKeys: z
       .function()
@@ -244,21 +256,26 @@ export const InternalWalletInterfaceSchema: ApiSchemaFor<InternalWalletInterface
     // @ts-ignore
     storeCapabilityGrants: z
       .function()
-      .args(z.string(), z.array(z.any()), z.any().optional())
+      .args(z.string(), z.array(z.any()), z.array(z.any()).optional())
+      .returns(z.void()),
+    // @ts-ignore
+    revokeCapability: z
+      .function()
+      .args(z.string(), z.any())
       .returns(z.void()),
     // @ts-ignore
     updateAccountAuthorization: z
       .function()
       .args(
         z.string(),
-        z.array(z.object({ alias: z.string(), item: z.string() }))
+        z.array(z.object({ alias: z.string(), item: z.string() })),
       ),
     // @ts-ignore
     updateAddressBookAuthorization: z
       .function()
       .args(
         z.string(),
-        z.array(z.object({ alias: z.string(), item: z.string() }))
+        z.array(z.object({ alias: z.string(), item: z.string() })),
       ),
     // @ts-ignore
     revokeAuthorization: z.function().args(z.string()),

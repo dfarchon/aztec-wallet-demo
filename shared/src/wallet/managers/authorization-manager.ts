@@ -99,6 +99,10 @@ export class AuthorizationManager {
       itemsNeedingAuth.push(item);
     }
 
+    // Track ALL requested keys in __requested__ (including auto-approved ones)
+    // so the Apps tab always knows what the app has requested
+    await this.trackRequestedKeys(items);
+
     // If all items were auto-approved, return immediately
     if (itemsNeedingAuth.length === 0) {
       return {
@@ -200,6 +204,26 @@ export class AuthorizationManager {
     if (pending) {
       pending.promise.resolve(response);
       this.pendingAuthorizations.delete(response.id);
+    }
+  }
+
+  /**
+   * Track all persistence keys from the given items in __requested__.
+   * Called for ALL items (both auto-approved and needing-auth) so the
+   * Apps tab always knows what was requested.
+   */
+  private async trackRequestedKeys(items: AuthorizationItem[]): Promise<void> {
+    const allKeys: string[] = [];
+    for (const item of items) {
+      if (item.persistence) {
+        const keys = Array.isArray(item.persistence.storageKey)
+          ? item.persistence.storageKey
+          : [item.persistence.storageKey];
+        allKeys.push(...keys);
+      }
+    }
+    if (allKeys.length > 0) {
+      await this.db.appendRequestedKeys(this.appId, allKeys);
     }
   }
 

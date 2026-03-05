@@ -2,7 +2,6 @@ import { AztecAddress } from "@aztec/aztec.js/addresses";
 import { Fr, Fq } from "@aztec/aztec.js/fields";
 import { type Aliased } from "@aztec/aztec.js/wallet";
 import {
-  type AppCapabilities,
   type GrantedCapability,
   type GrantedAccountsCapability,
   type GrantedContractsCapability,
@@ -311,48 +310,23 @@ export class WalletDB {
 
   /**
    * Store capability grants by translating them to persistent authorization entries.
-   * Each capability may generate multiple storage keys.
+   * Additive: upserts new keys without clearing existing ones.
+   * Also appends the granted capabilities to __requested__ for cumulative tracking.
    *
    * @param appId - Application ID
-   * @param manifest - Original capability manifest (for reference)
    * @param granted - Granted capabilities to store
+   * @param requestedCapabilities - All capabilities that were requested (including denied ones), for __requested__ tracking
    */
   async storeCapabilityGrants(
     appId: string,
     granted: GrantedCapability[],
-    requestedManifest?: AppCapabilities,
+    requestedCapabilities?: GrantedCapability[],
   ): Promise<void> {
     this.logger.info(
       `[storeCapabilityGrants] Called for ${appId} with ${granted.length} capabilities`,
     );
 
-    // First, clear all existing authorizations for this app (except __behavior__ and __manifest__)
-    // This ensures removed capabilities are actually removed
-    const keysToDelete: string[] = [];
-    for await (const [key, _] of this.authorizations.entriesAsync()) {
-      if (key.startsWith(`${appId}:`)) {
-        const storageKey = key.substring(appId.length + 1);
-        // Preserve the behavior and manifest metadata
-        if (storageKey !== "__behavior__" && storageKey !== "__manifest__") {
-          keysToDelete.push(key);
-        }
-      }
-    }
-
-    this.logger.info(
-      `[storeCapabilityGrants] Found ${keysToDelete.length} keys to delete: ${keysToDelete.join(", ")}`,
-    );
-
-    for (const key of keysToDelete) {
-      await this.authorizations.delete(key);
-      this.logger.info(`[storeCapabilityGrants] Deleted key: ${key}`);
-    }
-
-    this.logger.info(
-      `Cleared ${keysToDelete.length} existing authorizations for ${appId} (preserved __behavior__)`,
-    );
-
-    // Now store the new capability grants
+    // Store the new capability grants (additive — upserts on top of existing)
     const allKeys: string[] = [];
 
     for (const capability of granted) {
@@ -366,10 +340,9 @@ export class WalletDB {
         await this.storePersistentAuthorization(appId, key, {
           persistent: true,
           grantedAt: Date.now(),
-          capability: capability, // Store full capability for reference
-          ...capabilityData, // Merge capability-specific data (e.g., accounts array)
+          capability: capability,
+          ...capabilityData,
         });
-        this.logger.info(`[storeCapabilityGrants] Stored key: ${appId}:${key}`);
       }
     }
 
@@ -377,38 +350,74 @@ export class WalletDB {
       `Stored capability grants for ${appId}: ${granted.length} capabilities, ${allKeys.length} storage keys: ${allKeys.join(", ")}`,
     );
 
-    // Persist the original requested manifest so the Apps tab can show all capabilities
-    // (including ones the user denied) for later editing
-    if (requestedManifest) {
-      await this.storeRequestedManifest(appId, requestedManifest);
+    // Track all requested capabilities (including denied ones) in __requested__
+    // so the Apps tab can display them for future re-granting
+    const toTrack = requestedCapabilities ?? granted;
+    const requestedKeys = toTrack.flatMap((cap) =>
+      this.capabilityToStorageKeys(cap),
+    );
+    if (requestedKeys.length > 0) {
+      await this.appendRequestedKeys(appId, requestedKeys);
     }
   }
 
   /**
-   * Store the app's original requested manifest.
-   * Preserves the full capability list even if the user denied some capabilities.
+   * Revoke a specific capability by deleting its authorization keys.
+   * Does NOT remove from __requested__ — the capability remains visible for re-granting.
    */
-  async storeRequestedManifest(
+  async revokeCapability(
     appId: string,
-    manifest: AppCapabilities,
+    capability: GrantedCapability,
   ): Promise<void> {
-    const key = `${appId}:__manifest__`;
-    await this.authorizations.set(
-      key,
-      Buffer.from(jsonStringify(manifest)),
+    const keys = this.capabilityToStorageKeys(capability);
+    for (const key of keys) {
+      const fullKey = `${appId}:${key}`;
+      await this.authorizations.delete(fullKey);
+    }
+    this.logger.info(
+      `Revoked capability ${capability.type} for ${appId} (${keys.length} keys deleted)`,
     );
   }
 
   /**
-   * Retrieve the app's original requested manifest, if stored.
+   * Append storage keys to the cumulative __requested__ set for an app.
+   * This tracks everything the app has ever requested, regardless of approval.
+   * The set only grows — keys are never removed from __requested__.
    */
-  async getRequestedManifest(
+  async appendRequestedKeys(
     appId: string,
-  ): Promise<AppCapabilities | undefined> {
-    const key = `${appId}:__manifest__`;
-    const raw = await this.authorizations.getAsync(key);
-    if (!raw) return undefined;
-    return JSON.parse(Buffer.from(raw).toString()) as AppCapabilities;
+    keys: string[],
+  ): Promise<void> {
+    const existing = await this.getRequestedKeys(appId);
+    const merged = new Set([...existing, ...keys]);
+    const fullKey = `${appId}:__requested__`;
+    await this.authorizations.set(
+      fullKey,
+      Buffer.from(JSON.stringify([...merged])),
+    );
+  }
+
+  /**
+   * Get all storage keys that have ever been requested by an app.
+   * Returns the cumulative __requested__ set.
+   */
+  async getRequestedKeys(appId: string): Promise<string[]> {
+    const fullKey = `${appId}:__requested__`;
+    const raw = await this.authorizations.getAsync(fullKey);
+    if (!raw) return [];
+    return JSON.parse(Buffer.from(raw).toString()) as string[];
+  }
+
+  /**
+   * Reconstruct capabilities from the __requested__ keys.
+   * Returns everything the app has ever requested (for the Apps tab display).
+   */
+  async getRequestedCapabilities(
+    appId: string,
+  ): Promise<GrantedCapability[]> {
+    const keys = await this.getRequestedKeys(appId);
+    if (keys.length === 0) return [];
+    return this.reconstructCapabilitiesFromKeyList(keys);
   }
 
   /**
@@ -606,19 +615,40 @@ export class WalletDB {
   async reconstructCapabilitiesFromKeys(
     appId: string,
   ): Promise<GrantedCapability[]> {
-    const capabilities: GrantedCapability[] = [];
-
-    // Collect all keys for this app
+    // Collect all authorization keys for this app (excluding metadata)
     const keys: string[] = [];
     for await (const [key, _] of this.authorizations.entriesAsync()) {
       if (key.startsWith(`${appId}:`)) {
-        const storageKey = key.substring(appId.length + 1); // Remove "appId:" prefix
-        // Skip internal metadata keys
-        if (storageKey !== "__behavior__" && storageKey !== "__manifest__") {
+        const storageKey = key.substring(appId.length + 1);
+        if (!storageKey.startsWith("__")) {
           keys.push(storageKey);
         }
       }
     }
+
+    return this.reconstructCapabilitiesFromKeyList(keys, appId);
+  }
+
+  /**
+   * Reconstruct capabilities from a list of storage keys.
+   * Shared logic used by both reconstructCapabilitiesFromKeys (granted) and
+   * getRequestedCapabilities (__requested__).
+   *
+   * @param keys - Storage keys to reconstruct from
+   * @param appId - Optional appId for fetching stored data (accounts, contacts). If omitted, data-dependent fields use defaults.
+   */
+  reconstructCapabilitiesFromKeyList(
+    keys: string[],
+    appId?: string,
+  ): Promise<GrantedCapability[]> {
+    return this._reconstructCapabilities(keys, appId);
+  }
+
+  private async _reconstructCapabilities(
+    keys: string[],
+    appId?: string,
+  ): Promise<GrantedCapability[]> {
+    const capabilities: GrantedCapability[] = [];
 
     // Group keys by method to reconstruct capabilities
     const accountKeys = keys.filter(
@@ -647,9 +677,9 @@ export class WalletDB {
       const canGet = accountKeys.includes("getAccounts");
       const canCreateAuthWit = accountKeys.includes("createAuthWit");
 
-      // Fetch accounts from stored data
+      // Fetch accounts from stored data if appId available
       let accounts: Array<{ alias: string; item: AztecAddress }> = [];
-      if (canGet) {
+      if (canGet && appId) {
         const data = await this.retrievePersistentAuthorization(
           appId,
           "getAccounts",
@@ -724,7 +754,6 @@ export class WalletDB {
         if (hasWildcard) {
           simCap.transactions = { scope: "*" as const };
         } else {
-          // Extract patterns: simulateTx:contract:function
           const patterns = simulateTxKeys.map((k) => {
             const parts = k.split(":");
             const contract =
@@ -791,19 +820,23 @@ export class WalletDB {
       const dataCap: any = { type: "data" };
 
       if (addressBookKeys.length > 0) {
-        // Fetch contacts from stored data
-        const data = await this.retrievePersistentAuthorization(
-          appId,
-          "getAddressBook",
-        );
-        const contacts = (data?.contacts || []).map((contact: any) => ({
-          alias: contact.alias,
-          item:
-            typeof contact.item === "string"
-              ? AztecAddress.fromString(contact.item)
-              : contact.item,
-        }));
-        dataCap.addressBook = { contacts };
+        // Fetch contacts from stored data if appId available
+        if (appId) {
+          const data = await this.retrievePersistentAuthorization(
+            appId,
+            "getAddressBook",
+          );
+          const contacts = (data?.contacts || []).map((contact: any) => ({
+            alias: contact.alias,
+            item:
+              typeof contact.item === "string"
+                ? AztecAddress.fromString(contact.item)
+                : contact.item,
+          }));
+          dataCap.addressBook = { contacts };
+        } else {
+          dataCap.addressBook = true;
+        }
       }
 
       if (privateEventsKeys.length > 0) {
@@ -824,15 +857,18 @@ export class WalletDB {
   }
 
   /**
-   * List all apps that have persistent authorizations
+   * List all apps that have persistent authorizations.
+   * Uses __requested__ and __behavior__ markers to reliably extract appIds
+   * (appIds may contain colons, e.g. URLs).
    */
   async listAuthorizedApps(): Promise<string[]> {
     const appIds = new Set<string>();
+    const MARKERS = [":__requested__", ":__behavior__"];
     for await (const [key, _] of this.authorizations.entriesAsync()) {
-      // Keys are formatted as "${appId}:${method}"
-      const appId = key.split(":")[0];
-      if (appId) {
-        appIds.add(appId);
+      for (const marker of MARKERS) {
+        if (key.endsWith(marker)) {
+          appIds.add(key.slice(0, -marker.length));
+        }
       }
     }
     return Array.from(appIds);
@@ -880,10 +916,10 @@ export class WalletDB {
    * Revoke all persistent authorizations for an app
    */
   async revokeAppAuthorizations(appId: string) {
+    const prefix = `${appId}:`;
     const keysToDelete: string[] = [];
     for await (const [key, _] of this.authorizations.entriesAsync()) {
-      const [authAppId] = key.split(":");
-      if (authAppId === appId) {
+      if (key.startsWith(prefix)) {
         keysToDelete.push(key);
       }
     }
@@ -1010,8 +1046,6 @@ export class WalletDB {
     }
     return results;
   }
-
-  /**
 
   /**
    * Store the authorization behavior for an app (mode and expiration).

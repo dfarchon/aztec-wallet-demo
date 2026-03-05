@@ -1,4 +1,4 @@
-import { useContext, useEffect, useState, useMemo, useRef } from "react";
+import { useContext, useEffect, useState, useRef, useCallback } from "react";
 import {
   Card,
   CardContent,
@@ -13,7 +13,6 @@ import {
   Block as RevokeIcon,
 } from "@mui/icons-material";
 import { WalletContext } from "../../../../renderer";
-import { AztecAddress } from "@aztec/aztec.js/addresses";
 import type { GrantedCapability, AppCapabilities, CAPABILITY_VERSION, Capability } from "@aztec/aztec.js/wallet";
 import type { AuthorizationItem, RequestCapabilitiesParams } from "../../../../../wallet/types/authorization";
 import { AuthorizeCapabilitiesContent } from "../../../authorization/AuthorizeCapabilitiesContent";
@@ -24,45 +23,107 @@ interface AppAuthorizationCardProps {
   onUpdate: () => Promise<void>;
 }
 
+/**
+ * Extract all contract addresses from a list of capabilities.
+ */
+function extractContractAddresses(caps: GrantedCapability[]): string[] {
+  const addresses = new Set<string>();
+  for (const cap of caps) {
+    if (cap.type === "contracts" && cap.contracts !== "*") {
+      for (const addr of cap.contracts) addresses.add(addr.toString());
+    }
+    if (cap.type === "simulation") {
+      for (const scope of [cap.transactions, cap.utilities]) {
+        if (scope && scope.scope !== "*") {
+          for (const p of scope.scope) {
+            if (p.contract !== "*") addresses.add(p.contract.toString());
+          }
+        }
+      }
+    }
+    if (cap.type === "transaction" && cap.scope !== "*") {
+      for (const p of cap.scope) {
+        if (p.contract !== "*") addresses.add(p.contract.toString());
+      }
+    }
+    if (cap.type === "data" && cap.privateEvents?.contracts !== "*") {
+      for (const addr of cap.privateEvents?.contracts ?? []) {
+        addresses.add(addr.toString());
+      }
+    }
+  }
+  return [...addresses];
+}
+
 export function AppAuthorizationCard({
   appId,
   onRevoke,
   onUpdate,
 }: AppAuthorizationCardProps) {
   const { walletAPI } = useContext(WalletContext);
-  const [capabilities, setCapabilities] = useState<GrantedCapability[]>([]);
-  const [requestedManifest, setRequestedManifest] = useState<AppCapabilities | null>(null);
-  const [contractNames, setContractNames] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [revoking, setRevoking] = useState(false);
   const [saving, setSaving] = useState(false);
   const [fakeRequest, setFakeRequest] = useState<AuthorizationItem<RequestCapabilitiesParams> | null>(null);
+  // Track granted capabilities for diffing in handleCapabilitiesChange, but don't
+  // use as a useEffect dependency to avoid re-render loops.
+  const grantedRef = useRef<GrantedCapability[]>([]);
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     loadCapabilities();
-  }, [appId]);
-
-  useEffect(() => {
-    // Cleanup: clear any pending save on unmount
     return () => {
       if (saveTimeoutRef.current) {
         clearTimeout(saveTimeoutRef.current);
       }
     };
-  }, []);
+  }, [appId]);
 
   const loadCapabilities = async () => {
     try {
       setLoading(true);
-      const [caps, result] = await Promise.all([
-        walletAPI.getAppCapabilities(appId),
-        walletAPI.getAppRequestedManifest(appId),
-      ]);
-      setCapabilities(caps);
-      setRequestedManifest(result?.manifest ?? null);
-      setContractNames(result?.contractNames ?? {});
-      console.log("[AppAuthorizationCard] Loaded capabilities:", caps);
+      const result = await walletAPI.getAppCapabilities(appId);
+      grantedRef.current = result.granted;
+
+      // Resolve contract names from all requested capabilities
+      const addresses = extractContractAddresses(result.requested);
+      const resolvedNames = addresses.length > 0
+        ? await walletAPI.resolveContractNames(addresses)
+        : {};
+
+      // Build existingGrants from currently-granted capabilities
+      const existingGrants: Record<string, boolean> = {};
+      for (const capability of result.granted) {
+        const keys = await walletAPI.capabilityToStorageKeys(capability);
+        for (const key of keys) {
+          existingGrants[key] = true;
+        }
+      }
+
+      // Build the fake request once with all data
+      if (result.requested.length > 0) {
+        const manifest: AppCapabilities = {
+          version: "1.0" as typeof CAPABILITY_VERSION,
+          metadata: { name: appId, version: "1.0.0" },
+          capabilities: result.requested as unknown as Capability[],
+        };
+
+        setFakeRequest({
+          id: "view-granted",
+          appId,
+          method: "requestCapabilities",
+          params: {
+            manifest,
+            newCapabilityIndices: [],
+            contractNames: resolvedNames,
+            existingGrants,
+            isAppFirstTime: false,
+          },
+          timestamp: Date.now(),
+        });
+      } else {
+        setFakeRequest(null);
+      }
     } catch (err) {
       console.error("Failed to load app capabilities:", err);
     } finally {
@@ -73,7 +134,7 @@ export function AppAuthorizationCard({
   const handleRevoke = async () => {
     if (
       !confirm(
-        `Are you sure you want to revoke all authorizations for ${appId}? The app will need to request authorization again.`
+        `Are you sure you want to revoke all authorizations for ${appId}? The app will need to request authorization again.`,
       )
     ) {
       return;
@@ -89,40 +150,44 @@ export function AppAuthorizationCard({
     }
   };
 
-  const handleCapabilitiesChange = (data: {
+  const handleCapabilitiesChange = useCallback((data: {
     granted: GrantedCapability[];
     mode: "strict" | "permissive";
     duration: number;
   }) => {
-    console.log("[AppAuthorizationCard] handleCapabilitiesChange called with:", {
-      appId,
-      grantedCount: data.granted.length,
-      granted: data.granted,
-      mode: data.mode,
-      duration: data.duration,
-    });
-
     // Clear any pending save
     if (saveTimeoutRef.current) {
-      console.log("[AppAuthorizationCard] Clearing previous timeout");
       clearTimeout(saveTimeoutRef.current);
     }
 
     // Debounce: save after 500ms of no changes
-    console.log("[AppAuthorizationCard] Setting up debounced save (500ms)");
     saveTimeoutRef.current = setTimeout(async () => {
-      console.log("[AppAuthorizationCard] Debounced save firing now");
       try {
         setSaving(true);
 
-        console.log("[AppAuthorizationCard] Calling storeCapabilityGrants with:", {
-          appId,
-          grantedCount: data.granted.length,
-          granted: data.granted,
-        });
+        // Build new granted keys set
+        const newGrantedKeys = new Set<string>();
+        for (const cap of data.granted) {
+          const keys = await walletAPI.capabilityToStorageKeys(cap);
+          for (const key of keys) newGrantedKeys.add(key);
+        }
 
-        await walletAPI.storeCapabilityGrants(appId, data.granted);
-        console.log("[AppAuthorizationCard] storeCapabilityGrants completed successfully");
+        // Store all newly granted capabilities (additive upsert)
+        if (data.granted.length > 0) {
+          await walletAPI.storeCapabilityGrants(appId, data.granted);
+        }
+
+        // Revoke capabilities that were previously granted but no longer in the new set
+        for (const cap of grantedRef.current) {
+          const keys = await walletAPI.capabilityToStorageKeys(cap);
+          const allStillGranted = keys.every((k) => newGrantedKeys.has(k));
+          if (!allStillGranted) {
+            await walletAPI.revokeCapability(appId, cap);
+          }
+        }
+
+        // Update ref (not state — no re-render needed)
+        grantedRef.current = data.granted;
       } catch (err) {
         console.error("[AppAuthorizationCard] Failed to save capabilities:", err);
         alert(`Failed to save: ${err instanceof Error ? err.message : String(err)}`);
@@ -130,58 +195,7 @@ export function AppAuthorizationCard({
         setSaving(false);
       }
     }, 500);
-  };
-
-
-  // Create a fake AuthorizationItem to pass to AuthorizeCapabilitiesContent
-  // Build it asynchronously when capabilities change
-  useEffect(() => {
-    const buildFakeRequest = async () => {
-      if (loading) {
-        setFakeRequest(null);
-        return;
-      }
-
-      // Use the stored original manifest when available — it includes ALL capabilities
-      // the app requested, even ones the user denied. Fall back to granted capabilities only.
-      const manifest: AppCapabilities = requestedManifest ?? {
-        version: "1.0" as typeof CAPABILITY_VERSION,
-        metadata: { name: appId, version: "1.0.0" },
-        capabilities: capabilities as unknown as Capability[],
-      };
-
-      if (manifest.capabilities.length === 0) {
-        setFakeRequest(null);
-        return;
-      }
-
-      // Build existingGrants from the currently-granted capabilities
-      // so AuthorizeCapabilitiesContent pre-checks only what was actually granted
-      const existingGrants: Record<string, boolean> = {};
-      for (const capability of capabilities) {
-        const keys = await walletAPI.capabilityToStorageKeys(capability);
-        for (const key of keys) {
-          existingGrants[key] = true;
-        }
-      }
-
-      setFakeRequest({
-        id: "view-granted",
-        appId,
-        method: "requestCapabilities",
-        params: {
-          manifest,
-          newCapabilityIndices: [],
-          contractNames,
-          existingGrants,
-          isAppFirstTime: false,
-        },
-        timestamp: Date.now(),
-      });
-    };
-
-    buildFakeRequest();
-  }, [loading, capabilities, requestedManifest, contractNames, appId, walletAPI]);
+  }, [appId, walletAPI]);
 
   return (
     <Card sx={{ width: "100%", position: "relative" }}>
@@ -223,8 +237,8 @@ export function AppAuthorizationCard({
             showAppId={false}
           />
         ) : (
-          <Alert severity="warning">
-            No capability manifest found for this app
+          <Alert severity="info">
+            No capabilities have been requested by this app yet
           </Alert>
         )}
       </CardContent>

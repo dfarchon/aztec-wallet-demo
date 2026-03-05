@@ -35,17 +35,20 @@ contextBridge.exposeInMainWorld("walletAPI", {
   listAuthorizedApps(stringifiedArgs: string): Promise<string[]> {
     return ipcRenderer.invoke("listAuthorizedApps", stringifiedArgs);
   },
-  getAppCapabilities(stringifiedArgs: string): Promise<any[]> {
+  getAppCapabilities(stringifiedArgs: string): Promise<any> {
     return ipcRenderer.invoke("getAppCapabilities", stringifiedArgs);
   },
-  getAppRequestedManifest(stringifiedArgs: string): Promise<any> {
-    return ipcRenderer.invoke("getAppRequestedManifest", stringifiedArgs);
+  resolveContractNames(stringifiedArgs: string): Promise<Record<string, string>> {
+    return ipcRenderer.invoke("resolveContractNames", stringifiedArgs);
   },
   capabilityToStorageKeys(stringifiedArgs: string): Promise<string[]> {
     return ipcRenderer.invoke("capabilityToStorageKeys", stringifiedArgs);
   },
   storeCapabilityGrants(stringifiedArgs: string): Promise<void> {
     return ipcRenderer.invoke("storeCapabilityGrants", stringifiedArgs);
+  },
+  revokeCapability(stringifiedArgs: string): Promise<void> {
+    return ipcRenderer.invoke("revokeCapability", stringifiedArgs);
   },
   updateAccountAuthorization(stringifiedArgs: string): Promise<void> {
     return ipcRenderer.invoke("updateAccountAuthorization", stringifiedArgs);
