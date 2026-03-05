@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Native Messaging Host for Aztec Keychain.
+ * Native Messaging Host for Demo Wallet.
  *
  * This binary is spawned by the browser when the extension calls
  * browser.runtime.connectNative('com.aztec.keychain').
@@ -48,7 +48,7 @@ async function main(): Promise<void> {
     const errorMsg =
       err instanceof Error
         ? err.message
-        : "Failed to connect to Aztec Keychain app";
+        : "Failed to connect to Demo Wallet app";
     log(`Failed to connect: ${errorMsg}`);
     // Send error back to extension before exiting
     stdio.send({

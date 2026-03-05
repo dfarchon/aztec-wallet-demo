@@ -306,7 +306,7 @@ function App() {
               strokeLinejoin="round"
             />
           </svg>
-          <span className="title">Keychain</span>
+          <span className="title">Demo Wallet</span>
         </div>
         <div className="header-right">
           {status && (

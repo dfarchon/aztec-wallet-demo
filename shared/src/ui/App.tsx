@@ -305,7 +305,7 @@ export function App() {
         >
           <AccountBalanceWalletIcon fontSize="small" color="primary" />
           <Typography variant="caption" fontWeight="bold" sx={{ flexGrow: 1 }}>
-            Aztec Keychain
+            Demo Wallet
           </Typography>
           <NetworkSelector />
         </Box>
@@ -590,7 +590,7 @@ export function App() {
         <AppBar position="static">
           <Toolbar>
             <Typography variant="h6" component="h1" sx={{ flexGrow: 1 }}>
-              Aztec Keychain
+              Demo Wallet
             </Typography>
             <NetworkSelector />
           </Toolbar>
