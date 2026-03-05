@@ -33,10 +33,6 @@ jobs:
       - name: Install dependencies
         run: yarn install --immutable
 
-      - name: Build web wallet
-        working-directory: ./web
-        run: yarn build
-
       - name: Install Vercel CLI
         run: npm install --global vercel@latest
 
@@ -44,12 +40,9 @@ jobs:
         working-directory: ./web
         run: vercel pull --yes --environment=production --token=${{ secrets.VERCEL_TOKEN }}
 
-      - name: Prepare prebuilt output
+      - name: Build with Vercel
         working-directory: ./web
-        run: |
-          mkdir -p .vercel/output
-          cp -r dist .vercel/output/static
-          cp vercel.json .vercel/output/config.json
+        run: vercel build --token=${{ secrets.VERCEL_TOKEN }}
 
       - name: Deploy to Vercel
         id: deploy
