@@ -4,7 +4,7 @@ import { defineConfig } from "wxt";
 export default defineConfig({
   modules: ["@wxt-dev/module-react"],
   manifest: {
-    permissions: ["nativeMessaging", "storage"],
+    permissions: ["nativeMessaging", "storage", "webNavigation"],
     // Chrome extension key for stable extension ID
     // This gives extension ID: hjhmnnoabfekdjkkfhegoieolcdlmmjc
     // Generated with: openssl genrsa 2048 | openssl rsa -pubout -outform DER | base64
