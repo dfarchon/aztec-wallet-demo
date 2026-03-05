@@ -94,7 +94,7 @@ function IframeContent() {
   useEffect(() => {
     const config: IframeConnectionConfig = {
       walletId: "demo-web-wallet",
-      walletName: "Aztec Demo Web Wallet",
+      walletName: "Aztec Web Demo Wallet",
       walletVersion: "0.1.0",
       // Empty allowedOrigins = all origins allowed (dev / prototype mode)
       allowedOrigins: [],

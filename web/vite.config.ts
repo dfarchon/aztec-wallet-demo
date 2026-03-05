@@ -33,14 +33,6 @@ export default defineConfig({
       allow: [searchForWorkspaceRoot(import.meta.dirname)],
     },
   },
-  preview: {
-    port: 3001,
-    headers: {
-      "Cross-Origin-Opener-Policy": "same-origin",
-      "Cross-Origin-Embedder-Policy": "require-corp",
-      "Cross-Origin-Resource-Policy": "cross-origin",
-    },
-  },
   optimizeDeps: {
     // These packages contain native WASM/binary assets - exclude from pre-bundling
     exclude: ["@aztec/noir-acvm_js", "@aztec/noir-noirc_abi", "@aztec/bb.js"],

@@ -5,10 +5,10 @@
  * but uses window.postMessage instead of browser.runtime messaging.
  *
  * Message flow (wallet receives):
- *   parent → DISCOVERY_REQUEST  → show approval UI → send DISCOVERY_RESPONSE
+ *   parent → DISCOVERY  → show approval UI → send DISCOVERY_RESPONSE
  *   parent → KEY_EXCHANGE_REQUEST → ECDH → send KEY_EXCHANGE_RESPONSE
  *   parent → SECURE_MESSAGE (encrypted WalletMessage) → decrypt → ExternalWallet → encrypt → SECURE_RESPONSE
- *   parent → DISCONNECT_REQUEST → terminate session
+ *   parent → DISCONNECT → terminate session
  *
  * The wallet announces itself by posting WALLET_READY as soon as the handler starts,
  * so the dApp knows it can send a discovery request.
@@ -26,29 +26,13 @@ import {
 import {
   type WalletMessage,
   type WalletResponse,
-  WalletMessageType,
 } from "@aztec/wallet-sdk/types";
 import { WalletSchema } from "@aztec/aztec.js/wallet";
 import { parseWithOptionals, schemaHasMethod } from "@aztec/foundation/schemas";
 import { jsonStringify } from "@aztec/foundation/json-rpc";
 import { createLogger } from "@aztec/aztec.js/log";
 import type { ExternalWallet } from "@demo-wallet/shared/core";
-
-// ─── Internal message types (mirrors extension's internal_message_types.ts) ───
-
-export const IframeMessageType = {
-  // dApp → wallet
-  DISCOVERY_REQUEST: "iframe-discovery-request",
-  KEY_EXCHANGE_REQUEST: "iframe-key-exchange-request",
-  DISCONNECT_REQUEST: "iframe-disconnect-request",
-  SECURE_MESSAGE: "iframe-secure-message",
-  // wallet → dApp
-  WALLET_READY: "iframe-wallet-ready",
-  DISCOVERY_RESPONSE: "iframe-discovery-response",
-  KEY_EXCHANGE_RESPONSE: "iframe-key-exchange-response",
-  SECURE_RESPONSE: "iframe-secure-response",
-  SESSION_DISCONNECTED: "iframe-session-disconnected",
-} as const;
+import { IframeMessageType } from "./iframe-message-types.js";
 
 interface PendingSession {
   requestId: string;
@@ -149,7 +133,7 @@ export class IframeConnectionHandler {
     if (!msg || typeof msg !== "object" || !msg.type) return;
 
     switch (msg.type) {
-      case IframeMessageType.DISCOVERY_REQUEST:
+      case IframeMessageType.DISCOVERY:
         this.handleDiscoveryRequest(msg, event.origin);
         break;
       case IframeMessageType.KEY_EXCHANGE_REQUEST:
@@ -158,7 +142,7 @@ export class IframeConnectionHandler {
       case IframeMessageType.SECURE_MESSAGE:
         await this.handleSecureMessage(msg);
         break;
-      case IframeMessageType.DISCONNECT_REQUEST:
+      case IframeMessageType.DISCONNECT:
         this.terminateSession(msg.sessionId);
         break;
     }

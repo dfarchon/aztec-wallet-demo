@@ -7,7 +7,7 @@ import { ChunkReassembler } from "../utils/chunk_reassembler";
 
 // Wallet configuration
 const WALLET_ID = "aztec-keychain";
-const WALLET_NAME = "Aztec Keychain";
+const WALLET_NAME = "Aztec Native Demo Wallet";
 const WALLET_VERSION = "1.0.0";
 const NATIVE_HOST_NAME = "com.aztec.keychain";
 

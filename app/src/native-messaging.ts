@@ -59,7 +59,7 @@ export function checkSystemWideManifest(nativeHostPath: string, chromeExtensionI
     const manifest = JSON.stringify(
       {
         name: NATIVE_HOST_NAME,
-        description: "Aztec Keychain Native Messaging Host",
+        description: "Demo Wallet Native Messaging Host",
         path: nativeHostPath,
         type: "stdio",
         allowed_origins: [`chrome-extension://${extensionId}/`],
@@ -169,7 +169,7 @@ function getManifestPaths(): { firefox: string[]; chrome: string[] } {
 function createFirefoxManifest(nativeHostPath: string): object {
   return {
     name: NATIVE_HOST_NAME,
-    description: "Aztec Keychain Native Messaging Host",
+    description: "Demo Wallet Native Messaging Host",
     path: nativeHostPath,
     type: "stdio",
     allowed_extensions: [FIREFOX_EXTENSION_ID],
@@ -185,7 +185,7 @@ function createChromeManifest(
 ): object {
   return {
     name: NATIVE_HOST_NAME,
-    description: "Aztec Keychain Native Messaging Host",
+    description: "Demo Wallet Native Messaging Host",
     path: nativeHostPath,
     type: "stdio",
     allowed_origins: [`chrome-extension://${extensionId}/`],
