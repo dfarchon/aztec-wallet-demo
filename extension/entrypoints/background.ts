@@ -345,7 +345,7 @@ export default defineBackground(async () => {
             messageId: "disconnect",
             walletId: WALLET_ID,
             error: {
-              type: WalletMessageType.SESSION_DISCONNECTED,
+              type: WalletMessageType.DISCONNECT,
               message: "Disconnected by user",
             },
           });
@@ -451,7 +451,7 @@ export default defineBackground(async () => {
               messageId: "disconnect",
               walletId: WALLET_ID,
               error: {
-                type: WalletMessageType.SESSION_DISCONNECTED,
+                type: WalletMessageType.DISCONNECT,
                 message: "Wallet backend disconnected",
               },
             });
