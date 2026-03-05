@@ -244,9 +244,9 @@ export default defineBackground(async () => {
     sessionHandler.terminateForTab(tabId);
   });
 
-  browser.tabs.onUpdated.addListener((tabId, changeInfo) => {
-    if (changeInfo.status === "loading" && changeInfo.url) {
-      sessionHandler.terminateForTab(tabId);
+  browser.webNavigation.onBeforeNavigate.addListener((details) => {
+    if (details.frameId === 0) {
+      sessionHandler.terminateForTab(details.tabId);
     }
   });
 
