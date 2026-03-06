@@ -158,8 +158,10 @@ export async function getOrCreateSession(
         }
       >();
 
-      // Initial sync: write existing accounts to cookie (standalone mode only)
-      if (_cookiePassphrase) {
+      // Initial sync: write existing accounts to cookie (standalone mode only).
+      // The iframe must NEVER overwrite the cookie — it's read-only for accounts.
+      const isIframe = typeof window !== "undefined" && window.self !== window.top;
+      if (_cookiePassphrase && !isIframe) {
         await syncAccountsToCookie(db);
       }
 
@@ -204,8 +206,10 @@ export async function getOrCreateSession(
       const wireEvents = (wallet: ExternalWallet | InternalWallet) => {
         wallet.addEventListener("wallet-update", (event: Event) => {
           onWalletEvent("wallet-update", (event as CustomEvent).detail);
-          // Re-sync accounts to cookie on every wallet update (if passphrase set)
-          if (_cookiePassphrase) {
+          // Re-sync accounts to cookie on every wallet update (standalone only).
+          // Iframe never writes to the cookie — it's read-only for accounts.
+          const isIframe = typeof window !== "undefined" && window.self !== window.top;
+          if (_cookiePassphrase && !isIframe) {
             syncAccountsToCookie(sharedResources.db);
           }
         });

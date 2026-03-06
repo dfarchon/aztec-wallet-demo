@@ -5,28 +5,26 @@
  * Two modes:
  * - "set": User sets a new PIN (standalone wallet, first time)
  * - "enter": User enters existing PIN (iframe, or standalone after reload)
+ *
+ * Renders as a full-viewport centered card (not a MUI Dialog) so it works
+ * without a ThemeProvider ancestor — the component applies dark styling inline.
  */
 
 import { useState, useCallback } from "react";
 import {
   Box,
   Button,
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
   TextField,
   Typography,
 } from "@mui/material";
 
 export interface PinDialogProps {
-  open: boolean;
   mode: "set" | "enter";
   error?: string | null;
   onSubmit: (pin: string) => void;
 }
 
-export function PinDialog({ open, mode, error, onSubmit }: PinDialogProps) {
+export function PinDialog({ mode, error, onSubmit }: PinDialogProps) {
   const [pin, setPin] = useState("");
   const [confirm, setConfirm] = useState("");
   const [localError, setLocalError] = useState<string | null>(null);
@@ -47,59 +45,130 @@ export function PinDialog({ open, mode, error, onSubmit }: PinDialogProps) {
   const displayError = error ?? localError;
 
   return (
-    <Dialog open={open} maxWidth="xs" fullWidth>
-      <DialogTitle>
-        {mode === "set" ? "Set wallet PIN" : "Enter wallet PIN"}
-      </DialogTitle>
-      <DialogContent>
-        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+    <Box
+      sx={{
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+        minHeight: "100vh",
+        bgcolor: "#121212",
+        p: 3,
+      }}
+    >
+      <Box
+        sx={{
+          width: "100%",
+          maxWidth: 360,
+          bgcolor: "#1e1e1e",
+          borderRadius: 2,
+          p: 3,
+          display: "flex",
+          flexDirection: "column",
+          gap: 2.5,
+        }}
+      >
+        <Typography
+          variant="h6"
+          sx={{ color: "#fff", fontFamily: "monospace", textAlign: "center" }}
+        >
+          {mode === "set" ? "Set wallet PIN" : "Enter wallet PIN"}
+        </Typography>
+
+        <Typography
+          variant="body2"
+          sx={{ color: "#999", fontFamily: "monospace", textAlign: "center" }}
+        >
           {mode === "set"
-            ? "This PIN encrypts your account secrets for cross-origin access. You'll need it when using the wallet from a dApp."
+            ? "This PIN encrypts your account secrets. You'll need it when using the wallet from a dApp."
             : "Enter your PIN to decrypt your wallet accounts."}
         </Typography>
-        <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
+
+        <TextField
+          autoFocus
+          label="PIN"
+          type="password"
+          value={pin}
+          onChange={(e) => setPin(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              if (mode === "set" && !confirm) return;
+              handleSubmit();
+            }
+          }}
+          inputProps={{ minLength: 6, maxLength: 32 }}
+          fullWidth
+          size="small"
+          sx={{
+            "& .MuiOutlinedInput-root": {
+              color: "#fff",
+              fontFamily: "monospace",
+              "& fieldset": { borderColor: "#444" },
+              "&:hover fieldset": { borderColor: "#666" },
+              "&.Mui-focused fieldset": { borderColor: "#715ec2" },
+            },
+            "& .MuiInputLabel-root": {
+              color: "#888",
+              fontFamily: "monospace",
+              "&.Mui-focused": { color: "#715ec2" },
+            },
+          }}
+        />
+
+        {mode === "set" && (
           <TextField
-            autoFocus
-            label="PIN"
+            label="Confirm PIN"
             type="password"
-            value={pin}
-            onChange={(e) => setPin(e.target.value)}
+            value={confirm}
+            onChange={(e) => setConfirm(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                if (mode === "set" && !confirm) return;
-                handleSubmit();
-              }
+              if (e.key === "Enter") handleSubmit();
             }}
             inputProps={{ minLength: 6, maxLength: 32 }}
             fullWidth
             size="small"
+            sx={{
+              "& .MuiOutlinedInput-root": {
+                color: "#fff",
+                fontFamily: "monospace",
+                "& fieldset": { borderColor: "#444" },
+                "&:hover fieldset": { borderColor: "#666" },
+                "&.Mui-focused fieldset": { borderColor: "#715ec2" },
+              },
+              "& .MuiInputLabel-root": {
+                color: "#888",
+                fontFamily: "monospace",
+                "&.Mui-focused": { color: "#715ec2" },
+              },
+            }}
           />
-          {mode === "set" && (
-            <TextField
-              label="Confirm PIN"
-              type="password"
-              value={confirm}
-              onChange={(e) => setConfirm(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") handleSubmit();
-              }}
-              inputProps={{ minLength: 6, maxLength: 32 }}
-              fullWidth
-              size="small"
-            />
-          )}
-          {displayError && (
-            <Typography variant="body2" color="error">
-              {displayError}
-            </Typography>
-          )}
-        </Box>
-      </DialogContent>
-      <DialogActions>
-        <Button onClick={handleSubmit} variant="contained" disabled={pin.length < 6}>
+        )}
+
+        {displayError && (
+          <Typography
+            variant="body2"
+            sx={{ color: "#f44336", fontFamily: "monospace", textAlign: "center" }}
+          >
+            {displayError}
+          </Typography>
+        )}
+
+        <Button
+          onClick={handleSubmit}
+          variant="contained"
+          disabled={pin.length < 6}
+          fullWidth
+          sx={{
+            bgcolor: "#715ec2",
+            fontFamily: "monospace",
+            textTransform: "none",
+            "&:hover": { bgcolor: "#5e4da6" },
+            "&.Mui-disabled": { bgcolor: "#333", color: "#666" },
+          }}
+        >
           {mode === "set" ? "Set PIN" : "Unlock"}
         </Button>
-      </DialogActions>
-    </Dialog>
+      </Box>
+    </Box>
   );
 }

@@ -1,17 +1,16 @@
 /**
  * IframeShell — wallet UI when embedded as a cross-origin iframe.
  *
- * Two-layer architecture:
+ * Centralized gating flow (all gates in IframeContent):
  *
- * 1. IframeShell (outer) — starts immediately, no IndexedDB.
- *    - Starts IframeConnectionHandler (posts WALLET_READY for discovery)
- *    - Handles discovery auto-approval and key exchange
- *    - Gates storage access for cross-origin iframes (user gesture required)
- *    - Only renders the wallet UI after storage access is confirmed
+ *   1. Storage access check — request unpartitioned cookie access
+ *   2. Cookie check — does an encrypted accounts cookie exist?
+ *   3. PIN gate — user enters PIN to decrypt accounts
+ *   4. WalletUI — PXE init, account bootstrap, wallet rendering
  *
- * 2. WalletUI (inner) — rendered lazily after storage access is granted.
- *    - Creates WalletApi / WalletContext (triggers PXE + IndexedDB init)
- *    - Renders App, authorization dialogs, etc.
+ * The IframeConnectionHandler starts immediately (no storage needed for
+ * discovery / key exchange). getExternalWallet awaits the PIN gate before
+ * bootstrapping accounts from the cookie.
  */
 
 import { StrictMode, useMemo, useState, useEffect, useRef, useCallback } from "react";
@@ -83,7 +82,7 @@ async function checkStorageAccess(): Promise<StorageAccessState> {
   return has ? "granted" : "needs-grant";
 }
 
-// ─── Inner: wallet UI (only mounted after storage access is confirmed) ───
+// ─── Inner: wallet UI (only mounted after all gates pass) ───
 
 function WalletUI({
   authQueue,
@@ -160,14 +159,76 @@ function WalletUI({
   );
 }
 
-// ─── Outer: connection handler + storage access gate ───
+// ─── Gate pages (themed inline, no ThemeProvider needed) ───
+
+function StorageAccessGate({
+  state,
+  onGrant,
+  onRetry,
+}: {
+  state: "needs-grant" | "needs-visit";
+  onGrant: () => void;
+  onRetry: () => void;
+}) {
+  return (
+    <Box sx={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100vh", gap: 2, p: 3, textAlign: "center", bgcolor: "#121212" }}>
+      <Typography variant="h6" sx={{ color: "#fff", fontFamily: "monospace" }}>
+        Aztec Web Demo Wallet
+      </Typography>
+      {state === "needs-grant" && (
+        <>
+          <Typography variant="body2" sx={{ color: "#999", fontFamily: "monospace" }}>
+            This wallet needs access to its storage to function.
+          </Typography>
+          <Button variant="contained" onClick={onGrant} sx={{ bgcolor: "#715ec2", fontFamily: "monospace", textTransform: "none", "&:hover": { bgcolor: "#5e4da6" } }}>
+            Authorize Storage Access
+          </Button>
+        </>
+      )}
+      {state === "needs-visit" && (
+        <>
+          <Typography variant="body2" sx={{ color: "#999", fontFamily: "monospace" }}>
+            Your browser requires you to visit the wallet site directly before it can be used in an iframe.
+          </Typography>
+          <Link href={window.location.origin} target="_blank" rel="noopener" sx={{ color: "#715ec2", fontFamily: "monospace" }}>
+            Open wallet in a new tab
+          </Link>
+          <Button variant="outlined" onClick={onRetry} sx={{ mt: 1, color: "#715ec2", borderColor: "#715ec2", fontFamily: "monospace", textTransform: "none" }}>
+            Retry
+          </Button>
+        </>
+      )}
+    </Box>
+  );
+}
+
+function NoCookieGate() {
+  return (
+    <Box sx={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100vh", gap: 2, p: 3, textAlign: "center", bgcolor: "#121212" }}>
+      <Typography variant="h6" sx={{ color: "#fff", fontFamily: "monospace" }}>
+        Aztec Web Demo Wallet
+      </Typography>
+      <Typography variant="body2" sx={{ color: "#999", fontFamily: "monospace" }}>
+        No wallet accounts found. Create an account in the standalone wallet first.
+      </Typography>
+      <Link href={window.location.origin} target="_blank" rel="noopener" sx={{ color: "#715ec2", fontFamily: "monospace" }}>
+        Open wallet
+      </Link>
+    </Box>
+  );
+}
+
+// ─── Outer: centralized gating ───
 
 function IframeContent() {
   const { currentNetwork } = useNetwork();
 
+  // Gate states
   const [storageAccess, setStorageAccess] = useState<StorageAccessState | "checking">("checking");
   const [pinState, setPinState] = useState<"checking" | "needs-pin" | "no-cookie" | "ready">("checking");
   const [pinError, setPinError] = useState<string | null>(null);
+
+  // Wallet state (only used after all gates pass)
   const [authQueue, setAuthQueue] = useState<AuthorizationRequest[]>([]);
   const [verificationHash, setVerificationHash] = useState<string | null>(null);
   const clearVerificationHash = useCallback(() => setVerificationHash(null), []);
@@ -184,16 +245,44 @@ function IframeContent() {
   const enqueueAuthRef = useRef(enqueueAuthRequest);
   useEffect(() => { enqueueAuthRef.current = enqueueAuthRequest; }, [enqueueAuthRequest]);
 
-  // Check storage access on mount
+  // ─── PIN gate promise ───
+  // getExternalWallet awaits this before bootstrapping accounts from cookie.
+  // Resolved when the PIN is verified or passphrase is already set.
+  const pinGateRef = useRef<{ resolve: () => void; promise: Promise<void> }>(null!);
+  if (!pinGateRef.current) {
+    let resolve: () => void;
+    const promise = new Promise<void>((r) => { resolve = r; });
+    pinGateRef.current = { resolve: resolve!, promise };
+  }
+
+  // ─── Gate 1: Storage access ───
+
   useEffect(() => {
     checkStorageAccess().then(setStorageAccess);
   }, []);
 
-  // After storage access is granted, check for cookie
+  const handleGrantClick = useCallback(async () => {
+    try {
+      await document.requestStorageAccess();
+      setStorageAccess("granted");
+    } catch {
+      setStorageAccess("needs-visit");
+    }
+  }, []);
+
+  const handleRetryClick = useCallback(async () => {
+    const has = await document.hasStorageAccess();
+    setStorageAccess(has ? "granted" : "needs-grant");
+  }, []);
+
+  // ─── Gate 2 + 3: Cookie + PIN check (after storage access is granted) ───
+
   useEffect(() => {
     if (storageAccess !== "granted") return;
     if (hasCookiePassphrase()) {
+      // Passphrase already set in this JS session (e.g. user re-navigated)
       setPinState("ready");
+      pinGateRef.current.resolve();
     } else if (hasAccountsCookie()) {
       setPinState("needs-pin");
     } else {
@@ -207,14 +296,14 @@ function IframeContent() {
       await readAccountsCookie(pin); // verify decryption works
       setCookiePassphrase(pin);
       setPinState("ready");
+      pinGateRef.current.resolve(); // unblock getExternalWallet
     } catch {
       setPinError("Wrong PIN. Please try again.");
     }
   }, []);
 
-  // Start the IframeConnectionHandler immediately — no IndexedDB needed for
-  // discovery or key exchange. getExternalWallet is only called after the dApp
-  // sends its first real message, by which point storage access is granted.
+  // ─── Connection handler (starts immediately, no storage needed) ───
+
   useEffect(() => {
     const config: IframeConnectionConfig = {
       walletId: "demo-web-wallet",
@@ -242,6 +331,10 @@ function IframeContent() {
           try { await document.requestStorageAccess(); } catch { /* already granted or not needed */ }
         }
 
+        // Wait for the user to enter the PIN before proceeding.
+        // This blocks until handlePinSubmit resolves the gate.
+        await pinGateRef.current.promise;
+
         const normalizedChainInfo = { chainId, version };
         const { external } = await getOrCreateSession(
           normalizedChainInfo,
@@ -268,87 +361,35 @@ function IframeContent() {
     return () => handler.stop();
   }, [currentNetwork.id]);
 
-  const handleGrantClick = useCallback(async () => {
-    try {
-      await document.requestStorageAccess();
-      setStorageAccess("granted");
-    } catch {
-      setStorageAccess("needs-visit");
-    }
-  }, []);
+  // ─── Render: centralized gate sequence ───
 
-  const handleRetryClick = useCallback(async () => {
-    const has = await document.hasStorageAccess();
-    setStorageAccess(has ? "granted" : "needs-grant");
-  }, []);
+  // Loading
+  if (storageAccess === "checking" || pinState === "checking") {
+    return <Box sx={{ height: "100vh", bgcolor: "#121212" }} />;
+  }
 
-  if (storageAccess === "checking") return <CssBaseline />;
-
+  // Gate 1: Storage access
   if (storageAccess !== "granted") {
     return (
-      <>
-        <CssBaseline />
-        <Box sx={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100vh", gap: 2, p: 3, textAlign: "center" }}>
-          <Typography variant="h6">Aztec Web Demo Wallet</Typography>
-          {storageAccess === "needs-grant" && (
-            <>
-              <Typography variant="body2" color="text.secondary">
-                This wallet needs access to its storage to function.
-              </Typography>
-              <Button variant="contained" onClick={handleGrantClick}>
-                Authorize Storage Access
-              </Button>
-            </>
-          )}
-          {storageAccess === "needs-visit" && (
-            <>
-              <Typography variant="body2" color="text.secondary">
-                Your browser requires you to visit the wallet site directly before it can be used in an iframe.
-              </Typography>
-              <Link href={window.location.origin} target="_blank" rel="noopener">
-                Open wallet in a new tab
-              </Link>
-              <Button variant="outlined" onClick={handleRetryClick} sx={{ mt: 1 }}>
-                Retry
-              </Button>
-            </>
-          )}
-        </Box>
-      </>
+      <StorageAccessGate
+        state={storageAccess}
+        onGrant={handleGrantClick}
+        onRetry={handleRetryClick}
+      />
     );
   }
 
-  // Storage access granted — now gate on PIN
-
-  if (pinState === "checking") return <CssBaseline />;
-
+  // Gate 2: No cookie
   if (pinState === "no-cookie") {
-    return (
-      <>
-        <CssBaseline />
-        <Box sx={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100vh", gap: 2, p: 3, textAlign: "center" }}>
-          <Typography variant="h6">Aztec Web Demo Wallet</Typography>
-          <Typography variant="body2" color="text.secondary">
-            No wallet accounts found. Create an account in the standalone wallet first.
-          </Typography>
-          <Link href={window.location.origin} target="_blank" rel="noopener">
-            Open wallet
-          </Link>
-        </Box>
-      </>
-    );
+    return <NoCookieGate />;
   }
 
+  // Gate 3: PIN entry
   if (pinState === "needs-pin") {
-    return (
-      <>
-        <CssBaseline />
-        <PinDialog open mode="enter" error={pinError} onSubmit={handlePinSubmit} />
-      </>
-    );
+    return <PinDialog mode="enter" error={pinError} onSubmit={handlePinSubmit} />;
   }
 
-  // PIN verified — mount the wallet UI (triggers PXE + IndexedDB init)
+  // All gates passed — mount the wallet UI
   return (
     <WalletUI
       authQueue={authQueue}
