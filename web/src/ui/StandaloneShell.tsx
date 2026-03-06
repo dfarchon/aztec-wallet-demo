@@ -2,15 +2,16 @@
  * StandaloneShell — full wallet UI when the web wallet is accessed directly
  * (not embedded as an iframe). Identical in look/feel to the Electron app.
  *
- * On first load, prompts the user to set a PIN for encrypting account secrets
- * in a cross-origin cookie. On subsequent loads, prompts for the existing PIN.
+ * Gating flow:
+ *   1. PIN check — first load: set a new PIN; subsequent loads: enter existing PIN
+ *   2. Once PIN is verified → mount Root (PXE + wallet UI)
  */
 
 import { useState, useCallback, useEffect } from "react";
 import { Root } from "@demo-wallet/shared/ui";
 import { WalletApi } from "./utils/wallet-api.ts";
 import { PinDialog } from "./components/PinDialog.tsx";
-import { hasAccountsCookie } from "../wallet/account-cookie.ts";
+import { hasAccountsCookie, readAccountsCookie } from "../wallet/account-cookie.ts";
 import { setCookiePassphrase } from "../wallet/wallet-service.ts";
 
 export function StandaloneShell() {
@@ -27,10 +28,6 @@ export function StandaloneShell() {
       setPinError(null);
 
       if (pinMode === "enter") {
-        // Verify the PIN can decrypt the existing cookie
-        const { readAccountsCookie } = await import(
-          "../wallet/account-cookie.ts"
-        );
         try {
           await readAccountsCookie(pin);
         } catch {
@@ -48,7 +45,6 @@ export function StandaloneShell() {
   if (!pinReady) {
     return (
       <PinDialog
-        open
         mode={pinMode}
         error={pinError}
         onSubmit={handlePinSubmit}
