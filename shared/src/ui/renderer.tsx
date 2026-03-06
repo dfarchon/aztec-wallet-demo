@@ -44,6 +44,9 @@ const theme = createTheme(themeOptions);
 
 export const WalletContext = createContext<{
   walletAPI: InternalWalletInterface;
+  embeddedMode?: boolean;
+  /** Iframe-only: re-read account cookie and import new accounts into WalletDB */
+  onRefreshAccounts?: () => Promise<void>;
 }>({ walletAPI: null! });
 
 interface WalletProviderWrapperProps {

@@ -43,8 +43,10 @@ import {
   IframeConnectionHandler,
   type IframeConnectionConfig,
 } from "../wallet/iframe-connection-handler.ts";
-import { getOrCreateSession } from "../wallet/wallet-service.ts";
+import { getOrCreateSession, bootstrapAccountsFromCookie, setCookiePassphrase, hasCookiePassphrase } from "../wallet/wallet-service.ts";
+import { hasAccountsCookie, readAccountsCookie } from "../wallet/account-cookie.ts";
 import { EmojiVerification } from "./components/EmojiVerification.tsx";
+import { PinDialog } from "./components/PinDialog.tsx";
 import { Fr } from "@aztec/aztec.js/fields";
 
 const themeOptions: ThemeOptions = {
@@ -99,7 +101,14 @@ function WalletUI({
     () => WalletApi.create(chainInfo.chainId, chainInfo.version),
     [currentNetwork.id],
   );
-  const walletContext = useMemo(() => ({ walletAPI }), [walletAPI]);
+  const onRefreshAccounts = useCallback(async () => {
+    await bootstrapAccountsFromCookie({ chainId: chainInfo.chainId, version: chainInfo.version });
+  }, [chainInfo.chainId, chainInfo.version]);
+
+  const walletContext = useMemo(
+    () => ({ walletAPI, embeddedMode: true, onRefreshAccounts }),
+    [walletAPI, onRefreshAccounts],
+  );
   const currentAuth = authQueue[0] ?? null;
 
   const handleAuthApprove = (itemResponses: Record<string, any>) => {
@@ -157,6 +166,8 @@ function IframeContent() {
   const { currentNetwork } = useNetwork();
 
   const [storageAccess, setStorageAccess] = useState<StorageAccessState | "checking">("checking");
+  const [pinState, setPinState] = useState<"checking" | "needs-pin" | "no-cookie" | "ready">("checking");
+  const [pinError, setPinError] = useState<string | null>(null);
   const [authQueue, setAuthQueue] = useState<AuthorizationRequest[]>([]);
   const [verificationHash, setVerificationHash] = useState<string | null>(null);
   const clearVerificationHash = useCallback(() => setVerificationHash(null), []);
@@ -176,6 +187,29 @@ function IframeContent() {
   // Check storage access on mount
   useEffect(() => {
     checkStorageAccess().then(setStorageAccess);
+  }, []);
+
+  // After storage access is granted, check for cookie
+  useEffect(() => {
+    if (storageAccess !== "granted") return;
+    if (hasCookiePassphrase()) {
+      setPinState("ready");
+    } else if (hasAccountsCookie()) {
+      setPinState("needs-pin");
+    } else {
+      setPinState("no-cookie");
+    }
+  }, [storageAccess]);
+
+  const handlePinSubmit = useCallback(async (pin: string) => {
+    setPinError(null);
+    try {
+      await readAccountsCookie(pin); // verify decryption works
+      setCookiePassphrase(pin);
+      setPinState("ready");
+    } catch {
+      setPinError("Wrong PIN. Please try again.");
+    }
   }, []);
 
   // Start the IframeConnectionHandler immediately — no IndexedDB needed for
@@ -202,8 +236,15 @@ function IframeContent() {
         const rawVersion = (chainInfo as any).version;
         const chainId = rawChainId instanceof Fr ? rawChainId : Fr.fromString(String(rawChainId));
         const version = rawVersion instanceof Fr ? rawVersion : Fr.fromString(String(rawVersion));
+
+        // Ensure storage access for cookies before PXE init
+        if (document.requestStorageAccess) {
+          try { await document.requestStorageAccess(); } catch { /* already granted or not needed */ }
+        }
+
+        const normalizedChainInfo = { chainId, version };
         const { external } = await getOrCreateSession(
-          { chainId, version },
+          normalizedChainInfo,
           appId,
           (eventType, detail) => {
             if (eventType === "wallet-update") {
@@ -215,6 +256,10 @@ function IframeContent() {
             }
           },
         );
+
+        // Bootstrap accounts from cookie into the partitioned WalletDB
+        await bootstrapAccountsFromCookie(normalizedChainInfo);
+
         return external;
       },
     });
@@ -273,7 +318,37 @@ function IframeContent() {
     );
   }
 
-  // Storage access granted — mount the wallet UI (triggers PXE + IndexedDB init)
+  // Storage access granted — now gate on PIN
+
+  if (pinState === "checking") return <CssBaseline />;
+
+  if (pinState === "no-cookie") {
+    return (
+      <>
+        <CssBaseline />
+        <Box sx={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100vh", gap: 2, p: 3, textAlign: "center" }}>
+          <Typography variant="h6">Aztec Web Demo Wallet</Typography>
+          <Typography variant="body2" color="text.secondary">
+            No wallet accounts found. Create an account in the standalone wallet first.
+          </Typography>
+          <Link href={window.location.origin} target="_blank" rel="noopener">
+            Open wallet
+          </Link>
+        </Box>
+      </>
+    );
+  }
+
+  if (pinState === "needs-pin") {
+    return (
+      <>
+        <CssBaseline />
+        <PinDialog open mode="enter" error={pinError} onSubmit={handlePinSubmit} />
+      </>
+    );
+  }
+
+  // PIN verified — mount the wallet UI (triggers PXE + IndexedDB init)
   return (
     <WalletUI
       authQueue={authQueue}

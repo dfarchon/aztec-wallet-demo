@@ -1,10 +1,12 @@
 import { Fr } from "@aztec/aztec.js/fields";
 import { useContext, useEffect, useState } from "react";
 import Box from "@mui/material/Box";
+import Button from "@mui/material/Button";
 import Typography from "@mui/material/Typography";
 import Snackbar from "@mui/material/Snackbar";
 import Alert from "@mui/material/Alert";
 import { randomBytes } from "@aztec/foundation/crypto/random";
+import Link from "@mui/material/Link";
 import { AccountBox } from "./components/AccountBox.tsx";
 import { DraggableFab } from "../../shared/DraggableFab.tsx";
 import { WalletContext } from "../../../renderer";
@@ -14,8 +16,9 @@ import type { InternalAccount } from "../../../../wallet/core/internal-wallet";
 export function AccountsManager() {
   const [accounts, setAccounts] = useState<InternalAccount[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
 
-  const { walletAPI } = useContext(WalletContext);
+  const { walletAPI, embeddedMode, onRefreshAccounts } = useContext(WalletContext);
   const { currentNetwork } = useNetwork();
 
   const loadAccounts = async () => {
@@ -26,6 +29,18 @@ export function AccountsManager() {
   useEffect(() => {
     loadAccounts();
   }, [currentNetwork.id, walletAPI]); // Reload when network changes
+
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    try {
+      if (onRefreshAccounts) await onRefreshAccounts();
+      await loadAccounts();
+    } catch (err: any) {
+      setError(err.message || "Failed to refresh accounts");
+    } finally {
+      setRefreshing(false);
+    }
+  };
 
   const handleCreateAccount = async () => {
     try {
@@ -48,22 +63,61 @@ export function AccountsManager() {
         <Typography variant="h5" component="h2">
           Accounts
         </Typography>
-        <Box
-          sx={{
-            display: "flex",
-            width: "100%",
-            flexDirection: "column",
-            gap: 1,
-          }}
-        >
-          {accounts.map((account, index) => (
-            <AccountBox key={index} QRButton account={account} />
-          ))}
-        </Box>
+        {embeddedMode && accounts.length === 0 ? (
+          <Box sx={{ textAlign: "center", py: 4 }}>
+            <Typography variant="body1" color="text.secondary" gutterBottom>
+              No accounts found.
+            </Typography>
+            <Typography variant="body2" color="text.secondary" gutterBottom>
+              Create an account in the standalone wallet first.
+            </Typography>
+            <Box sx={{ display: "flex", gap: 2, justifyContent: "center", mt: 1 }}>
+              <Link
+                href={window.location.origin}
+                target="_blank"
+                rel="noopener"
+              >
+                Open wallet
+              </Link>
+              <Button
+                variant="outlined"
+                size="small"
+                disabled={refreshing}
+                onClick={handleRefresh}
+              >
+                {refreshing ? "Refreshing..." : "Refresh"}
+              </Button>
+            </Box>
+          </Box>
+        ) : (
+          <Box
+            sx={{
+              display: "flex",
+              width: "100%",
+              flexDirection: "column",
+              gap: 1,
+            }}
+          >
+            {accounts.map((account, index) => (
+              <AccountBox key={index} QRButton account={account} />
+            ))}
+            {embeddedMode && (
+              <Button
+                variant="text"
+                size="small"
+                disabled={refreshing}
+                onClick={handleRefresh}
+                sx={{ alignSelf: "center", mt: 1 }}
+              >
+                {refreshing ? "Refreshing..." : "Refresh accounts"}
+              </Button>
+            )}
+          </Box>
+        )}
       </Box>
 
-      {/* Draggable FAB for creating accounts */}
-      <DraggableFab onClick={handleCreateAccount} />
+      {/* Draggable FAB for creating accounts — hidden in embedded mode */}
+      {!embeddedMode && <DraggableFab onClick={handleCreateAccount} />}
       <Snackbar
         open={error !== null}
         autoHideDuration={6000}
