@@ -8,7 +8,7 @@
 
 import { type Fr } from "@aztec/foundation/schemas";
 import type { InternalWalletInterface, AuthorizationResponse } from "@demo-wallet/shared/core";
-import { getOrCreateSession } from "../../wallet/wallet-service.ts";
+import { getOrCreateSession, bootstrapAccountsFromCookie } from "../../wallet/wallet-service.ts";
 
 // Event emitter for wallet update and authorization request events.
 // These are global because they are session-level (not per-API instance).
@@ -20,24 +20,9 @@ const walletUpdateListeners = new Set<WalletUpdateListener>();
 const authorizationRequestListeners = new Set<AuthorizationRequestListener>();
 const proofDebugExportListeners = new Set<ProofDebugExportListener>();
 
-// BroadcastChannel: propagates wallet-update events to other same-origin tabs/windows
-// (e.g. a standalone wallet tab open at localhost:3001 while the iframe is embedded elsewhere).
-const BROADCAST_CHANNEL_NAME = "aztec-wallet-updates";
-const bc = new BroadcastChannel(BROADCAST_CHANNEL_NAME);
-
-// Receive updates broadcast from other contexts (iframe → standalone tab, or vice versa)
-bc.addEventListener("message", (event) => {
-  if (event.data?.type === "wallet-update") {
-    walletUpdateListeners.forEach(cb => cb(event.data.detail));
-  }
-});
-
 export function emitWalletUpdate(detail: unknown) {
-  // detail arrives as a JSON string (from WalletUpdateEvent which calls jsonStringify)
   const parsed = typeof detail === "string" ? JSON.parse(detail) : detail;
   walletUpdateListeners.forEach(cb => cb(parsed));
-  // Broadcast to other same-origin tabs (BroadcastChannel does NOT fire in the sending context)
-  bc.postMessage({ type: "wallet-update", detail: parsed });
 }
 
 function emitAuthorizationRequest(detail: unknown) {
@@ -72,7 +57,13 @@ async function getInternalWallet(
         else if (eventType === "authorization-request") emitAuthorizationRequest(detail);
         else if (eventType === "proof-debug-export-request") emitProofDebugExportRequest(detail);
       },
-    ).then(({ internal }) => internal);
+    ).then(async ({ internal }) => {
+      // In iframe mode, bootstrap accounts from the unpartitioned cookie
+      if (window.self !== window.top) {
+        await bootstrapAccountsFromCookie({ chainId, version });
+      }
+      return internal;
+    });
     walletCache.set(key, p);
   }
   return walletCache.get(key)!;
@@ -117,6 +108,16 @@ export class WalletApi {
             // InternalWallet doesn't expose resolveAuthorization directly;
             // it lives in the shared pendingAuthorizations map accessed via the session.
             await resolveAuthorizationViaSession(target.chainId, target.version, response);
+          };
+        }
+
+        // Block account creation in iframe mode to prevent desyncs with cookie
+        if (propStr === "createAccount" && window.self !== window.top) {
+          return async () => {
+            throw new Error(
+              "Account creation is not available in embedded mode. " +
+              "Please create accounts in the standalone wallet.",
+            );
           };
         }
 

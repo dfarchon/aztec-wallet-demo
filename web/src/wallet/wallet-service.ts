@@ -15,6 +15,7 @@
 import { createAztecNodeClient } from "@aztec/aztec.js/node";
 import { type ChainInfo } from "@aztec/aztec.js/account";
 import { Fr } from "@aztec/aztec.js/fields";
+import { AztecAddress } from "@aztec/aztec.js/addresses";
 import { createLogger } from "@aztec/aztec.js/log";
 import { type PromiseWithResolvers } from "@aztec/foundation/promise";
 import {
@@ -32,6 +33,11 @@ import {
   type PXECreationOptions,
 } from "@aztec/pxe/client/lazy";
 import { createStore } from "@aztec/kv-store/indexeddb";
+import {
+  writeAccountsCookie,
+  readAccountsCookie,
+  type PortableAccount,
+} from "./account-cookie.ts";
 
 type SessionData = {
   sharedResources: Promise<{
@@ -53,6 +59,20 @@ type SessionData = {
 };
 
 const RUNNING_SESSIONS = new Map<string, SessionData>();
+
+// ─── Passphrase management ───
+// Held in memory only — never persisted. Must be set before cookie operations.
+let _cookiePassphrase: string | null = null;
+
+/** Set the passphrase used to encrypt/decrypt the accounts cookie. */
+export function setCookiePassphrase(passphrase: string): void {
+  _cookiePassphrase = passphrase;
+}
+
+/** Returns whether a cookie passphrase has been set for this session. */
+export function hasCookiePassphrase(): boolean {
+  return _cookiePassphrase !== null;
+}
 
 export async function getOrCreateSession(
   chainInfo: ChainInfo,
@@ -138,6 +158,11 @@ export async function getOrCreateSession(
         }
       >();
 
+      // Initial sync: write existing accounts to cookie (standalone mode only)
+      if (_cookiePassphrase) {
+        await syncAccountsToCookie(db);
+      }
+
       return { pxe, node, db, pendingAuthorizations };
     })();
 
@@ -179,6 +204,10 @@ export async function getOrCreateSession(
       const wireEvents = (wallet: ExternalWallet | InternalWallet) => {
         wallet.addEventListener("wallet-update", (event: Event) => {
           onWalletEvent("wallet-update", (event as CustomEvent).detail);
+          // Re-sync accounts to cookie on every wallet update (if passphrase set)
+          if (_cookiePassphrase) {
+            syncAccountsToCookie(sharedResources.db);
+          }
         });
         wallet.addEventListener("authorization-request", (event: Event) => {
           onWalletEvent("authorization-request", (event as CustomEvent).detail);
@@ -204,6 +233,93 @@ export async function getOrCreateSession(
   }
 
   return session.wallets.get(appId)!;
+}
+
+/**
+ * Import accounts from the encrypted cookie into the session's WalletDB.
+ * Used by the iframe to bootstrap accounts from the standalone wallet.
+ * Requires passphrase to have been set via setCookiePassphrase().
+ * Skips accounts that already exist in the DB.
+ */
+export async function bootstrapAccountsFromCookie(
+  chainInfo: ChainInfo,
+): Promise<number> {
+  const log = createLogger("wallet:cookie");
+
+  if (!_cookiePassphrase) {
+    log.warn("No passphrase set — cannot read encrypted cookie");
+    return 0;
+  }
+
+  const portableAccounts = await readAccountsCookie(_cookiePassphrase);
+
+  if (portableAccounts.length === 0) {
+    log.info("No accounts found in cookie");
+    return 0;
+  }
+
+  const { db } = await getSharedResources(chainInfo);
+  const existingAccounts = await db.listAccounts();
+  const existingAddresses = new Set(
+    existingAccounts.map((a) => a.item.toString()),
+  );
+
+  let imported = 0;
+  for (const portable of portableAccounts) {
+    if (existingAddresses.has(portable.address)) continue;
+
+    const address = AztecAddress.fromString(portable.address);
+    const secretKey = Fr.fromString(portable.secretKey);
+    const salt = Fr.fromString(portable.salt);
+    const signingKey = Buffer.from(portable.signingKey, "hex");
+
+    await db.storeAccount(address, {
+      type: portable.type,
+      secretKey,
+      salt,
+      signingKey,
+      alias: portable.alias,
+    });
+
+    imported++;
+    log.info(`Imported account ${portable.alias ?? portable.address} from cookie`);
+  }
+
+  log.info(`Bootstrapped ${imported} new account(s) from cookie (${portableAccounts.length} total in cookie)`);
+  return imported;
+}
+
+/**
+ * Read all accounts from WalletDB and write them to the encrypted cookie.
+ * Called after PXE init and on wallet-update events to keep the cookie in sync.
+ * No-op if passphrase is not set.
+ */
+async function syncAccountsToCookie(db: WalletDB): Promise<void> {
+  if (!_cookiePassphrase) return;
+
+  try {
+    const aliasedAccounts = await db.listAccounts();
+    const portableAccounts: PortableAccount[] = [];
+
+    for (const { alias, item: address } of aliasedAccounts) {
+      const account = await db.retrieveAccount(address);
+      portableAccounts.push({
+        address: address.toString(),
+        secretKey: account.secretKey.toString(),
+        salt: account.salt.toString(),
+        signingKey: Buffer.from(account.signingKey).toString("hex"),
+        type: account.type,
+        alias,
+      });
+    }
+
+    await writeAccountsCookie(portableAccounts, _cookiePassphrase);
+    createLogger("wallet:cookie").info(
+      `Synced ${portableAccounts.length} account(s) to encrypted cookie`,
+    );
+  } catch (e) {
+    createLogger("wallet:cookie").warn(`Failed to sync accounts to cookie: ${e}`);
+  }
 }
 
 /** Returns the current sessions map (for debugging / UI inspection) */
