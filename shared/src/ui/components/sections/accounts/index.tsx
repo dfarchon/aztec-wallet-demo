@@ -5,6 +5,7 @@ import Button from "@mui/material/Button";
 import Typography from "@mui/material/Typography";
 import Snackbar from "@mui/material/Snackbar";
 import Alert from "@mui/material/Alert";
+import CircularProgress from "@mui/material/CircularProgress";
 import { randomBytes } from "@aztec/foundation/crypto/random";
 import Link from "@mui/material/Link";
 import { AccountBox } from "./components/AccountBox.tsx";
@@ -15,6 +16,7 @@ import type { InternalAccount } from "../../../../wallet/core/internal-wallet";
 
 export function AccountsManager() {
   const [accounts, setAccounts] = useState<InternalAccount[]>([]);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -27,7 +29,8 @@ export function AccountsManager() {
   };
 
   useEffect(() => {
-    loadAccounts();
+    setLoading(true);
+    loadAccounts().finally(() => setLoading(false));
   }, [currentNetwork.id, walletAPI]); // Reload when network changes
 
   const handleRefresh = async () => {
@@ -56,6 +59,17 @@ export function AccountsManager() {
       setError(err.message || "Failed to create account");
     }
   };
+
+  if (loading) {
+    return (
+      <Box sx={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", width: "100%", height: "100%", gap: 2 }}>
+        <CircularProgress size={32} />
+        <Typography variant="body2" color="text.secondary">
+          Loading accounts...
+        </Typography>
+      </Box>
+    );
+  }
 
   return (
     <>
