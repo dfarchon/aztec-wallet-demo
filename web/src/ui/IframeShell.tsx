@@ -359,12 +359,12 @@ function IframeContent() {
 
   // ─── Render: centralized gate sequence ───
 
-  // Loading
-  if (storageAccess === "checking" || pinState === "checking") {
+  // Gate 1: Storage access (check still in progress)
+  if (storageAccess === "checking") {
     return <CssBaseline />;
   }
 
-  // Gate 1: Storage access
+  // Gate 1: Storage access (needs user action)
   if (storageAccess !== "granted") {
     return (
       <>
@@ -378,7 +378,12 @@ function IframeContent() {
     );
   }
 
-  // Gate 2: No cookie
+  // Gate 2: Cookie + PIN (still checking)
+  if (pinState === "checking") {
+    return <CssBaseline />;
+  }
+
+  // Gate 2: No cookie exists
   if (pinState === "no-cookie") {
     return (
       <>
@@ -388,7 +393,7 @@ function IframeContent() {
     );
   }
 
-  // Gate 3: PIN entry
+  // Gate 3: PIN entry required
   if (pinState === "needs-pin") {
     return (
       <>
