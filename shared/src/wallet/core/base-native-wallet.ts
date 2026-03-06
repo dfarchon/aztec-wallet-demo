@@ -102,7 +102,7 @@ export abstract class BaseNativeWallet
    * @param signingKey - Signing key for the account
    * @returns AccountManager for this account
    */
-  protected async getAccountManager(
+  async getAccountManager(
     type: AccountType,
     secret: Fr,
     salt: Fr,
@@ -134,16 +134,22 @@ export abstract class BaseNativeWallet
       salt,
     );
 
-    const instance = await accountManager.getInstance();
-    const artifact = await accountManager
-      .getAccountContract()
-      .getContractArtifact();
-
-    await this.registerContract(
-      instance,
-      artifact,
-      accountManager.getSecretKey(),
+    const instance = accountManager.getInstance();
+    const existingInstance = await this.pxe.getContractInstance(
+      instance.address,
     );
+    if (!existingInstance) {
+      const existingArtifact = await this.pxe.getContractArtifact(
+        instance.currentContractClassId,
+      );
+      await this.registerContract(
+        instance,
+        !existingArtifact
+          ? await accountManager.getAccountContract().getContractArtifact()
+          : undefined,
+        accountManager.getSecretKey(),
+      );
+    }
 
     return accountManager;
   }

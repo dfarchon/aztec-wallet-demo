@@ -13,7 +13,14 @@
  * bootstrapping accounts from the cookie.
  */
 
-import { StrictMode, useMemo, useState, useEffect, useRef, useCallback } from "react";
+import {
+  StrictMode,
+  useMemo,
+  useState,
+  useEffect,
+  useRef,
+  useCallback,
+} from "react";
 import {
   Box,
   Button,
@@ -42,8 +49,15 @@ import {
   IframeConnectionHandler,
   type IframeConnectionConfig,
 } from "../wallet/iframe-connection-handler.ts";
-import { getOrCreateSession, bootstrapAccountsFromCookie, setCookiePassphrase, hasCookiePassphrase } from "../wallet/wallet-service.ts";
-import { hasAccountsCookie, readAccountsCookie } from "../wallet/account-cookie.ts";
+import {
+  getOrCreateSession,
+  setCookiePassphrase,
+  hasCookiePassphrase,
+} from "../wallet/wallet-service.ts";
+import {
+  hasAccountsCookie,
+  readAccountsCookie,
+} from "../wallet/account-cookie.ts";
 import { EmojiVerification } from "./components/EmojiVerification.tsx";
 import { PinDialog } from "./components/PinDialog.tsx";
 import { Fr } from "@aztec/aztec.js/fields";
@@ -70,16 +84,13 @@ const themeOptions: ThemeOptions = {
 };
 const theme = createTheme(themeOptions);
 
-type StorageAccessState = "granted" | "needs-grant" | "needs-visit";
-
 /**
- * Check whether we need a storage access grant.
- * Resolves to "granted" immediately when not in an iframe or already have access.
+ * Check whether we already have storage access.
+ * Returns true if not in an iframe or if access is already granted.
  */
-async function checkStorageAccess(): Promise<StorageAccessState> {
-  if (window.self === window.top || !document.hasStorageAccess) return "granted";
-  const has = await document.hasStorageAccess();
-  return has ? "granted" : "needs-grant";
+async function hasStorageAccessAlready(): Promise<boolean> {
+  if (window.self === window.top || !document.hasStorageAccess) return true;
+  return document.hasStorageAccess();
 }
 
 // ─── Inner: wallet UI (only mounted after all gates pass) ───
@@ -101,7 +112,11 @@ function WalletUI({
     [currentNetwork.id],
   );
   const onRefreshAccounts = useCallback(async () => {
-    await bootstrapAccountsFromCookie({ chainId: chainInfo.chainId, version: chainInfo.version });
+    const normalizedChainInfo = {
+      chainId: chainInfo.chainId,
+      version: chainInfo.version,
+    };
+    await getOrCreateSession(normalizedChainInfo, "refresh", () => {});
   }, [chainInfo.chainId, chainInfo.version]);
 
   const walletContext = useMemo(
@@ -126,7 +141,11 @@ function WalletUI({
     if (currentAuth) {
       const itemResponses: Record<string, any> = {};
       for (const item of currentAuth.items) {
-        itemResponses[item.id] = { id: item.id, approved: false, appId: item.appId };
+        itemResponses[item.id] = {
+          id: item.id,
+          approved: false,
+          appId: item.appId,
+        };
       }
       walletAPI.resolveAuthorization({
         id: currentAuth.id,
@@ -163,49 +182,57 @@ function WalletUI({
 
 function StorageAccessGate({
   state,
-  onGrant,
   onRetry,
 }: {
-  state: "needs-grant" | "needs-visit";
-  onGrant: () => void;
+  state: "needs-visit";
   onRetry: () => void;
 }) {
   return (
-    <Box sx={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100vh", gap: 2, p: 3, textAlign: "center" }}>
+    <Box
+      sx={{
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+        height: "100vh",
+        gap: 2,
+        p: 3,
+        textAlign: "center",
+      }}
+    >
       <Typography variant="h6">Aztec Web Demo Wallet</Typography>
-      {state === "needs-grant" && (
-        <>
-          <Typography variant="body2" color="text.secondary">
-            This wallet needs access to its storage to function.
-          </Typography>
-          <Button variant="contained" onClick={onGrant}>
-            Authorize Storage Access
-          </Button>
-        </>
-      )}
-      {state === "needs-visit" && (
-        <>
-          <Typography variant="body2" color="text.secondary">
-            Your browser requires you to visit the wallet site directly before it can be used in an iframe.
-          </Typography>
-          <Link href={window.location.origin} target="_blank" rel="noopener">
-            Open wallet in a new tab
-          </Link>
-          <Button variant="outlined" onClick={onRetry} sx={{ mt: 1 }}>
-            Retry
-          </Button>
-        </>
-      )}
+      <Typography variant="body2" color="text.secondary">
+        Your browser requires you to visit the wallet site directly before it
+        can be used in an iframe.
+      </Typography>
+      <Link href={window.location.origin} target="_blank" rel="noopener">
+        Open wallet in a new tab
+      </Link>
+      <Button variant="outlined" onClick={onRetry} sx={{ mt: 1 }}>
+        Retry
+      </Button>
     </Box>
   );
 }
 
 function NoCookieGate() {
   return (
-    <Box sx={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100vh", gap: 2, p: 3, textAlign: "center" }}>
+    <Box
+      sx={{
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+        height: "100vh",
+        gap: 2,
+        p: 3,
+        textAlign: "center",
+      }}
+    >
       <Typography variant="h6">Aztec Web Demo Wallet</Typography>
       <Typography variant="body2" color="text.secondary">
-        No wallet accounts found. Create an account in the standalone wallet first.
+        No wallet accounts found. Create an account in the standalone wallet
+        first.
       </Typography>
       <Link href={window.location.origin} target="_blank" rel="noopener">
         Open wallet
@@ -219,18 +246,28 @@ function NoCookieGate() {
 function IframeContent() {
   const { currentNetwork } = useNetwork();
 
-  // Gate states
-  const [storageAccess, setStorageAccess] = useState<StorageAccessState | "checking">("checking");
-  const [pinState, setPinState] = useState<"checking" | "needs-pin" | "no-cookie" | "ready">("checking");
+  // Single gate state: checking → needs-pin → needs-visit → no-cookie → ready
+  type GateState =
+    | "checking"
+    | "needs-pin"
+    | "needs-visit"
+    | "no-cookie"
+    | "ready";
+  const [gate, setGate] = useState<GateState>("checking");
   const [pinError, setPinError] = useState<string | null>(null);
 
-  // Wallet state (only used after all gates pass)
+  // Wallet state (only used after gate === "ready")
   const [authQueue, setAuthQueue] = useState<AuthorizationRequest[]>([]);
   const [verificationHash, setVerificationHash] = useState<string | null>(null);
-  const clearVerificationHash = useCallback(() => setVerificationHash(null), []);
+  const clearVerificationHash = useCallback(
+    () => setVerificationHash(null),
+    [],
+  );
 
   const clearVerificationHashRef = useRef(clearVerificationHash);
-  useEffect(() => { clearVerificationHashRef.current = clearVerificationHash; }, [clearVerificationHash]);
+  useEffect(() => {
+    clearVerificationHashRef.current = clearVerificationHash;
+  }, [clearVerificationHash]);
 
   const enqueueAuthRequest = useCallback((request: AuthorizationRequest) => {
     setAuthQueue((prev) => {
@@ -239,63 +276,84 @@ function IframeContent() {
     });
   }, []);
   const enqueueAuthRef = useRef(enqueueAuthRequest);
-  useEffect(() => { enqueueAuthRef.current = enqueueAuthRequest; }, [enqueueAuthRequest]);
+  useEffect(() => {
+    enqueueAuthRef.current = enqueueAuthRequest;
+  }, [enqueueAuthRequest]);
 
   // ─── PIN gate promise ───
   // getExternalWallet awaits this before bootstrapping accounts from cookie.
   // Resolved when the PIN is verified or passphrase is already set.
-  const pinGateRef = useRef<{ resolve: () => void; promise: Promise<void> }>(null!);
+  const pinGateRef = useRef<{ resolve: () => void; promise: Promise<void> }>(
+    null!,
+  );
   if (!pinGateRef.current) {
     let resolve: () => void;
-    const promise = new Promise<void>((r) => { resolve = r; });
+    const promise = new Promise<void>((r) => {
+      resolve = r;
+    });
     pinGateRef.current = { resolve: resolve!, promise };
   }
 
-  // ─── Gate 1: Storage access ───
+  // ─── Initial check: storage access + cookie + passphrase ───
 
   useEffect(() => {
-    checkStorageAccess().then(setStorageAccess);
+    (async () => {
+      const granted = await hasStorageAccessAlready();
+      if (granted) {
+        // Already have storage access — check cookie state
+        if (hasCookiePassphrase()) {
+          setGate("ready");
+          pinGateRef.current.resolve();
+        } else if (hasAccountsCookie()) {
+          setGate("needs-pin");
+        } else {
+          setGate("no-cookie");
+        }
+      } else {
+        // No storage access yet — show PIN dialog immediately.
+        // Storage access will be requested on the user's button click (user gesture).
+        setGate("needs-pin");
+      }
+    })();
   }, []);
 
-  const handleGrantClick = useCallback(async () => {
+  // ─── Combined PIN submit + storage access request ───
+  // The user's click on "Unlock" is a user gesture, which satisfies
+  // the browser's requirement for requestStorageAccess().
+
+  const handlePinSubmit = useCallback(async (pin: string) => {
+    setPinError(null);
+
+    // Request storage access if we don't have it yet (user gesture required)
+    if (document.requestStorageAccess) {
+      try {
+        await document.requestStorageAccess();
+      } catch {
+        // Browser requires a first-party visit before granting storage access
+        setGate("needs-visit");
+        return;
+      }
+    }
+
+    // Now we have cookie access — verify the PIN
+    if (!hasAccountsCookie()) {
+      setGate("no-cookie");
+      return;
+    }
+
     try {
-      await document.requestStorageAccess();
-      setStorageAccess("granted");
+      await readAccountsCookie(pin); // verify decryption works
+      setCookiePassphrase(pin);
+      setGate("ready");
+      pinGateRef.current.resolve(); // unblock getExternalWallet
     } catch {
-      setStorageAccess("needs-visit");
+      setPinError("Wrong PIN. Please try again.");
     }
   }, []);
 
   const handleRetryClick = useCallback(async () => {
     const has = await document.hasStorageAccess();
-    setStorageAccess(has ? "granted" : "needs-grant");
-  }, []);
-
-  // ─── Gate 2 + 3: Cookie + PIN check (after storage access is granted) ───
-
-  useEffect(() => {
-    if (storageAccess !== "granted") return;
-    if (hasCookiePassphrase()) {
-      // Passphrase already set in this JS session (e.g. user re-navigated)
-      setPinState("ready");
-      pinGateRef.current.resolve();
-    } else if (hasAccountsCookie()) {
-      setPinState("needs-pin");
-    } else {
-      setPinState("no-cookie");
-    }
-  }, [storageAccess]);
-
-  const handlePinSubmit = useCallback(async (pin: string) => {
-    setPinError(null);
-    try {
-      await readAccountsCookie(pin); // verify decryption works
-      setCookiePassphrase(pin);
-      setPinState("ready");
-      pinGateRef.current.resolve(); // unblock getExternalWallet
-    } catch {
-      setPinError("Wrong PIN. Please try again.");
-    }
+    setGate(has ? "needs-pin" : "needs-visit");
   }, []);
 
   // ─── Connection handler (starts immediately, no storage needed) ───
@@ -319,12 +377,22 @@ function IframeContent() {
         clearVerificationHashRef.current();
         const rawChainId = (chainInfo as any).chainId;
         const rawVersion = (chainInfo as any).version;
-        const chainId = rawChainId instanceof Fr ? rawChainId : Fr.fromString(String(rawChainId));
-        const version = rawVersion instanceof Fr ? rawVersion : Fr.fromString(String(rawVersion));
+        const chainId =
+          rawChainId instanceof Fr
+            ? rawChainId
+            : Fr.fromString(String(rawChainId));
+        const version =
+          rawVersion instanceof Fr
+            ? rawVersion
+            : Fr.fromString(String(rawVersion));
 
         // Ensure storage access for cookies before PXE init
         if (document.requestStorageAccess) {
-          try { await document.requestStorageAccess(); } catch { /* already granted or not needed */ }
+          try {
+            await document.requestStorageAccess();
+          } catch {
+            /* already granted or not needed */
+          }
         }
 
         // Wait for the user to enter the PIN before proceeding.
@@ -346,9 +414,6 @@ function IframeContent() {
           },
         );
 
-        // Bootstrap accounts from cookie into the partitioned WalletDB
-        await bootstrapAccountsFromCookie(normalizedChainInfo);
-
         return external;
       },
     });
@@ -359,32 +424,20 @@ function IframeContent() {
 
   // ─── Render: centralized gate sequence ───
 
-  // Gate 1: Storage access (check still in progress)
-  if (storageAccess === "checking") {
+  if (gate === "checking") {
     return <CssBaseline />;
   }
 
-  // Gate 1: Storage access (needs user action)
-  if (storageAccess !== "granted") {
+  if (gate === "needs-visit") {
     return (
       <>
         <CssBaseline />
-        <StorageAccessGate
-          state={storageAccess}
-          onGrant={handleGrantClick}
-          onRetry={handleRetryClick}
-        />
+        <StorageAccessGate state="needs-visit" onRetry={handleRetryClick} />
       </>
     );
   }
 
-  // Gate 2: Cookie + PIN (still checking)
-  if (pinState === "checking") {
-    return <CssBaseline />;
-  }
-
-  // Gate 2: No cookie exists
-  if (pinState === "no-cookie") {
+  if (gate === "no-cookie") {
     return (
       <>
         <CssBaseline />
@@ -393,8 +446,7 @@ function IframeContent() {
     );
   }
 
-  // Gate 3: PIN entry required
-  if (pinState === "needs-pin") {
+  if (gate === "needs-pin") {
     return (
       <>
         <CssBaseline />
