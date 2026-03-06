@@ -36,8 +36,13 @@ import { createStore } from "@aztec/kv-store/indexeddb";
 import {
   writeAccountsCookie,
   readAccountsCookie,
+  writeContactsCookies,
+  readContactsCookies,
   type PortableAccount,
+  type PortableContact,
 } from "./account-cookie.ts";
+
+const IS_IFRAME = typeof window !== "undefined" && window.self !== window.top;
 
 type SessionData = {
   sharedResources: Promise<{
@@ -158,11 +163,11 @@ export async function getOrCreateSession(
         }
       >();
 
-      // Initial sync: write existing accounts to cookie (standalone mode only).
-      // The iframe must NEVER overwrite the cookie — it's read-only for accounts.
-      const isIframe = typeof window !== "undefined" && window.self !== window.top;
-      if (_cookiePassphrase && !isIframe) {
+      // Initial sync: write existing data to cookies (standalone mode only).
+      // The iframe must NEVER overwrite cookies — it's read-only.
+      if (_cookiePassphrase && !IS_IFRAME) {
         await syncAccountsToCookie(db);
+        await syncContactsToCookie(db);
       }
 
       return { pxe, node, db, pendingAuthorizations };
@@ -206,11 +211,11 @@ export async function getOrCreateSession(
       const wireEvents = (wallet: ExternalWallet | InternalWallet) => {
         wallet.addEventListener("wallet-update", (event: Event) => {
           onWalletEvent("wallet-update", (event as CustomEvent).detail);
-          // Re-sync accounts to cookie on every wallet update (standalone only).
-          // Iframe never writes to the cookie — it's read-only for accounts.
-          const isIframe = typeof window !== "undefined" && window.self !== window.top;
-          if (_cookiePassphrase && !isIframe) {
+          // Re-sync to cookies on every wallet update (standalone only).
+          // Iframe never writes — it's read-only.
+          if (_cookiePassphrase && !IS_IFRAME) {
             syncAccountsToCookie(sharedResources.db);
+            syncContactsToCookie(sharedResources.db);
           }
         });
         wallet.addEventListener("authorization-request", (event: Event) => {
@@ -230,6 +235,12 @@ export async function getOrCreateSession(
       wireEvents(externalWallet);
       wireEvents(internalWallet);
 
+      // In iframe mode, bootstrap accounts and contacts from cookies into PXE.
+      if (IS_IFRAME && _cookiePassphrase) {
+        await bootstrapAccountsFromCookie(chainInfo, internalWallet);
+        await bootstrapContactsFromCookie(internalWallet);
+      }
+
       return { external: externalWallet, internal: internalWallet };
     };
 
@@ -240,13 +251,17 @@ export async function getOrCreateSession(
 }
 
 /**
- * Import accounts from the encrypted cookie into the session's WalletDB.
+ * Import accounts from the encrypted cookie into the session's WalletDB
+ * and register them with PXE (via InternalWallet.getAccountManager).
  * Used by the iframe to bootstrap accounts from the standalone wallet.
  * Requires passphrase to have been set via setCookiePassphrase().
  * Skips accounts that already exist in the DB.
+ *
+ * @param wallet - An InternalWallet instance used to register accounts with PXE.
  */
 export async function bootstrapAccountsFromCookie(
   chainInfo: ChainInfo,
+  wallet: InternalWallet,
 ): Promise<number> {
   const log = createLogger("wallet:cookie");
 
@@ -270,26 +285,70 @@ export async function bootstrapAccountsFromCookie(
 
   let imported = 0;
   for (const portable of portableAccounts) {
-    if (existingAddresses.has(portable.address)) continue;
-
-    const address = AztecAddress.fromString(portable.address);
     const secretKey = Fr.fromString(portable.secretKey);
     const salt = Fr.fromString(portable.salt);
     const signingKey = Buffer.from(portable.signingKey, "hex");
 
-    await db.storeAccount(address, {
-      type: portable.type,
-      secretKey,
-      salt,
-      signingKey,
-      alias: portable.alias,
-    });
+    if (!existingAddresses.has(portable.address)) {
+      const address = AztecAddress.fromString(portable.address);
+      await db.storeAccount(address, {
+        type: portable.type,
+        secretKey,
+        salt,
+        signingKey,
+        alias: portable.alias,
+      });
+      imported++;
+      log.info(
+        `Imported account ${portable.alias ?? portable.address} from cookie`,
+      );
+    }
 
-    imported++;
-    log.info(`Imported account ${portable.alias ?? portable.address} from cookie`);
+    // Register with PXE via the wallet's getAccountManager (idempotent).
+    // This creates the account contract, registers the artifact/instance,
+    // and registers the secret key so PXE can derive keys and decrypt notes.
+    await wallet.getAccountManager(portable.type, secretKey, salt, signingKey);
+    log.info(
+      `Registered account ${portable.alias ?? portable.address} with PXE`,
+    );
   }
 
-  log.info(`Bootstrapped ${imported} new account(s) from cookie (${portableAccounts.length} total in cookie)`);
+  log.info(
+    `Bootstrapped ${imported} new account(s) from cookie (${portableAccounts.length} total in cookie)`,
+  );
+  return imported;
+}
+
+/**
+ * Import contacts from the encrypted cookies into the session's WalletDB
+ * and register them as senders with PXE (via InternalWallet.registerSender).
+ * Used by the iframe to bootstrap contacts from the standalone wallet.
+ */
+async function bootstrapContactsFromCookie(
+  wallet: InternalWallet,
+): Promise<number> {
+  const log = createLogger("wallet:cookie");
+
+  if (!_cookiePassphrase) {
+    log.warn("No passphrase set — cannot read contacts cookies");
+    return 0;
+  }
+
+  const portableContacts = await readContactsCookies(_cookiePassphrase);
+  if (portableContacts.length === 0) {
+    log.info("No contacts found in cookies");
+    return 0;
+  }
+
+  let imported = 0;
+  for (const contact of portableContacts) {
+    const address = AztecAddress.fromBuffer(Buffer.from(contact.address));
+    // registerSender stores in DB + registers with PXE (idempotent)
+    await wallet.registerSender(address, contact.alias);
+    imported++;
+  }
+
+  log.info(`Bootstrapped ${imported} contact(s) from cookies`);
   return imported;
 }
 
@@ -322,7 +381,34 @@ async function syncAccountsToCookie(db: WalletDB): Promise<void> {
       `Synced ${portableAccounts.length} account(s) to encrypted cookie`,
     );
   } catch (e) {
-    createLogger("wallet:cookie").warn(`Failed to sync accounts to cookie: ${e}`);
+    createLogger("wallet:cookie").warn(
+      `Failed to sync accounts to cookie: ${e}`,
+    );
+  }
+}
+
+/**
+ * Read all contacts (senders) from WalletDB and write them to encrypted cookies.
+ * Called alongside syncAccountsToCookie. No-op if passphrase is not set.
+ */
+async function syncContactsToCookie(db: WalletDB): Promise<void> {
+  if (!_cookiePassphrase) return;
+
+  try {
+    const senders = await db.listSenders();
+    const portableContacts: PortableContact[] = senders.map(({ alias, item: address }) => ({
+      address: address.toBuffer(),
+      alias: alias.replace(/^senders:/, ""),
+    }));
+
+    await writeContactsCookies(portableContacts, _cookiePassphrase);
+    createLogger("wallet:cookie").info(
+      `Synced ${portableContacts.length} contact(s) to encrypted cookies`,
+    );
+  } catch (e) {
+    createLogger("wallet:cookie").warn(
+      `Failed to sync contacts to cookie: ${e}`,
+    );
   }
 }
 

@@ -8,7 +8,7 @@
 
 import { type Fr } from "@aztec/foundation/schemas";
 import type { InternalWalletInterface, AuthorizationResponse } from "@demo-wallet/shared/core";
-import { getOrCreateSession, bootstrapAccountsFromCookie } from "../../wallet/wallet-service.ts";
+import { getOrCreateSession } from "../../wallet/wallet-service.ts";
 
 // Event emitter for wallet update and authorization request events.
 // These are global because they are session-level (not per-API instance).
@@ -57,13 +57,7 @@ async function getInternalWallet(
         else if (eventType === "authorization-request") emitAuthorizationRequest(detail);
         else if (eventType === "proof-debug-export-request") emitProofDebugExportRequest(detail);
       },
-    ).then(async ({ internal }) => {
-      // In iframe mode, bootstrap accounts from the unpartitioned cookie
-      if (window.self !== window.top) {
-        await bootstrapAccountsFromCookie({ chainId, version });
-      }
-      return internal;
-    });
+    ).then(({ internal }) => internal);
     walletCache.set(key, p);
   }
   return walletCache.get(key)!;
