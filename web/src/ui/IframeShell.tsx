@@ -171,29 +171,27 @@ function StorageAccessGate({
   onRetry: () => void;
 }) {
   return (
-    <Box sx={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100vh", gap: 2, p: 3, textAlign: "center", bgcolor: "#121212" }}>
-      <Typography variant="h6" sx={{ color: "#fff", fontFamily: "monospace" }}>
-        Aztec Web Demo Wallet
-      </Typography>
+    <Box sx={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100vh", gap: 2, p: 3, textAlign: "center" }}>
+      <Typography variant="h6">Aztec Web Demo Wallet</Typography>
       {state === "needs-grant" && (
         <>
-          <Typography variant="body2" sx={{ color: "#999", fontFamily: "monospace" }}>
+          <Typography variant="body2" color="text.secondary">
             This wallet needs access to its storage to function.
           </Typography>
-          <Button variant="contained" onClick={onGrant} sx={{ bgcolor: "#715ec2", fontFamily: "monospace", textTransform: "none", "&:hover": { bgcolor: "#5e4da6" } }}>
+          <Button variant="contained" onClick={onGrant}>
             Authorize Storage Access
           </Button>
         </>
       )}
       {state === "needs-visit" && (
         <>
-          <Typography variant="body2" sx={{ color: "#999", fontFamily: "monospace" }}>
+          <Typography variant="body2" color="text.secondary">
             Your browser requires you to visit the wallet site directly before it can be used in an iframe.
           </Typography>
-          <Link href={window.location.origin} target="_blank" rel="noopener" sx={{ color: "#715ec2", fontFamily: "monospace" }}>
+          <Link href={window.location.origin} target="_blank" rel="noopener">
             Open wallet in a new tab
           </Link>
-          <Button variant="outlined" onClick={onRetry} sx={{ mt: 1, color: "#715ec2", borderColor: "#715ec2", fontFamily: "monospace", textTransform: "none" }}>
+          <Button variant="outlined" onClick={onRetry} sx={{ mt: 1 }}>
             Retry
           </Button>
         </>
@@ -204,14 +202,12 @@ function StorageAccessGate({
 
 function NoCookieGate() {
   return (
-    <Box sx={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100vh", gap: 2, p: 3, textAlign: "center", bgcolor: "#121212" }}>
-      <Typography variant="h6" sx={{ color: "#fff", fontFamily: "monospace" }}>
-        Aztec Web Demo Wallet
-      </Typography>
-      <Typography variant="body2" sx={{ color: "#999", fontFamily: "monospace" }}>
+    <Box sx={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100vh", gap: 2, p: 3, textAlign: "center" }}>
+      <Typography variant="h6">Aztec Web Demo Wallet</Typography>
+      <Typography variant="body2" color="text.secondary">
         No wallet accounts found. Create an account in the standalone wallet first.
       </Typography>
-      <Link href={window.location.origin} target="_blank" rel="noopener" sx={{ color: "#715ec2", fontFamily: "monospace" }}>
+      <Link href={window.location.origin} target="_blank" rel="noopener">
         Open wallet
       </Link>
     </Box>
@@ -365,28 +361,41 @@ function IframeContent() {
 
   // Loading
   if (storageAccess === "checking" || pinState === "checking") {
-    return <Box sx={{ height: "100vh", bgcolor: "#121212" }} />;
+    return <CssBaseline />;
   }
 
   // Gate 1: Storage access
   if (storageAccess !== "granted") {
     return (
-      <StorageAccessGate
-        state={storageAccess}
-        onGrant={handleGrantClick}
-        onRetry={handleRetryClick}
-      />
+      <>
+        <CssBaseline />
+        <StorageAccessGate
+          state={storageAccess}
+          onGrant={handleGrantClick}
+          onRetry={handleRetryClick}
+        />
+      </>
     );
   }
 
   // Gate 2: No cookie
   if (pinState === "no-cookie") {
-    return <NoCookieGate />;
+    return (
+      <>
+        <CssBaseline />
+        <NoCookieGate />
+      </>
+    );
   }
 
   // Gate 3: PIN entry
   if (pinState === "needs-pin") {
-    return <PinDialog mode="enter" error={pinError} onSubmit={handlePinSubmit} />;
+    return (
+      <>
+        <CssBaseline />
+        <PinDialog mode="enter" error={pinError} onSubmit={handlePinSubmit} />
+      </>
+    );
   }
 
   // All gates passed — mount the wallet UI

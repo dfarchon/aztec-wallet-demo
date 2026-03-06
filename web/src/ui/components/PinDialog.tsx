@@ -6,8 +6,9 @@
  * - "set": User sets a new PIN (standalone wallet, first time)
  * - "enter": User enters existing PIN (iframe, or standalone after reload)
  *
- * Renders as a full-viewport centered card (not a MUI Dialog) so it works
- * without a ThemeProvider ancestor — the component applies dark styling inline.
+ * Renders as a full-viewport centered card. Dark styling is applied inline
+ * so it looks correct even without a ThemeProvider ancestor (standalone shell
+ * renders this before the Root/ThemeProvider mounts).
  */
 
 import { useState, useCallback } from "react";
@@ -23,6 +24,21 @@ export interface PinDialogProps {
   error?: string | null;
   onSubmit: (pin: string) => void;
 }
+
+const textFieldSx = {
+  "& .MuiOutlinedInput-root": {
+    color: "#fff",
+    fontFamily: "monospace",
+    "& fieldset": { borderColor: "#444" },
+    "&:hover fieldset": { borderColor: "#666" },
+    "&.Mui-focused fieldset": { borderColor: "#715ec2" },
+  },
+  "& .MuiInputLabel-root": {
+    color: "#888",
+    fontFamily: "monospace",
+    "&.Mui-focused": { color: "#715ec2" },
+  },
+};
 
 export function PinDialog({ mode, error, onSubmit }: PinDialogProps) {
   const [pin, setPin] = useState("");
@@ -47,11 +63,11 @@ export function PinDialog({ mode, error, onSubmit }: PinDialogProps) {
   return (
     <Box
       sx={{
+        position: "fixed",
+        inset: 0,
         display: "flex",
-        flexDirection: "column",
         alignItems: "center",
         justifyContent: "center",
-        minHeight: "100vh",
         bgcolor: "#121212",
         p: 3,
       }}
@@ -99,20 +115,7 @@ export function PinDialog({ mode, error, onSubmit }: PinDialogProps) {
           inputProps={{ minLength: 6, maxLength: 32 }}
           fullWidth
           size="small"
-          sx={{
-            "& .MuiOutlinedInput-root": {
-              color: "#fff",
-              fontFamily: "monospace",
-              "& fieldset": { borderColor: "#444" },
-              "&:hover fieldset": { borderColor: "#666" },
-              "&.Mui-focused fieldset": { borderColor: "#715ec2" },
-            },
-            "& .MuiInputLabel-root": {
-              color: "#888",
-              fontFamily: "monospace",
-              "&.Mui-focused": { color: "#715ec2" },
-            },
-          }}
+          sx={textFieldSx}
         />
 
         {mode === "set" && (
@@ -127,20 +130,7 @@ export function PinDialog({ mode, error, onSubmit }: PinDialogProps) {
             inputProps={{ minLength: 6, maxLength: 32 }}
             fullWidth
             size="small"
-            sx={{
-              "& .MuiOutlinedInput-root": {
-                color: "#fff",
-                fontFamily: "monospace",
-                "& fieldset": { borderColor: "#444" },
-                "&:hover fieldset": { borderColor: "#666" },
-                "&.Mui-focused fieldset": { borderColor: "#715ec2" },
-              },
-              "& .MuiInputLabel-root": {
-                color: "#888",
-                fontFamily: "monospace",
-                "&.Mui-focused": { color: "#715ec2" },
-              },
-            }}
+            sx={textFieldSx}
           />
         )}
 
