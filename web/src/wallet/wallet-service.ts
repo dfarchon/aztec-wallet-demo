@@ -60,6 +60,8 @@ type SessionData = {
       }
     >;
   }>;
+  /** One-time account/contact bootstrap from cookies. Runs once per session. */
+  bootstrapDone: Promise<void> | null;
   wallets: Map<
     string,
     Promise<{ external: ExternalWallet; internal: InternalWallet }>
@@ -191,8 +193,7 @@ export async function getOrCreateSession(
       >();
 
       if (_cookiePassphrase) {
-        // Import capabilities from cookie first (additive-only: won't overwrite
-        // local state, only adds entries missing locally).
+        // Import capabilities from cookie (full overwrite: cookie is authoritative).
         await bootstrapCapabilitiesFromCookie(db);
 
         if (!IS_IFRAME) {
@@ -207,7 +208,7 @@ export async function getOrCreateSession(
       return { pxe, node, db, pendingAuthorizations };
     })();
 
-    session = { sharedResources: pxeInit, wallets: new Map() };
+    session = { sharedResources: pxeInit, bootstrapDone: null, wallets: new Map() };
     RUNNING_SESSIONS.set(sessionId, session);
   } else {
     createLogger("wallet:session").info(
@@ -265,10 +266,17 @@ export async function getOrCreateSession(
       wireEvents(internalWallet);
 
       // In iframe mode, bootstrap accounts and contacts from cookies into PXE.
-      // (Capabilities are bootstrapped at PXE init for both modes.)
-      if (IS_IFRAME && _cookiePassphrase) {
-        await bootstrapAccountsFromCookie(chainInfo, internalWallet);
-        await bootstrapContactsFromCookie(sharedResources.db, sharedResources.pxe);
+      // Runs once per session — first appId triggers it, others await the same promise.
+      // Must be serialized to avoid concurrent PXE operations on the same IndexedDB
+      // (IDB transactions auto-close on browser, causing "object not usable" errors).
+      if (IS_IFRAME && _cookiePassphrase && !session.bootstrapDone) {
+        session.bootstrapDone = (async () => {
+          await bootstrapAccountsFromCookie(chainInfo, internalWallet);
+          await bootstrapContactsFromCookie(sharedResources.db, sharedResources.pxe);
+        })();
+      }
+      if (session.bootstrapDone) {
+        await session.bootstrapDone;
       }
 
       return { external: externalWallet, internal: internalWallet };
@@ -335,11 +343,6 @@ export async function bootstrapAccountsFromCookie(
     }
 
     // Register with PXE via the wallet's getAccountManager (idempotent).
-    // Yield to a new macro-task between registrations so IndexedDB transactions
-    // from the previous iteration fully commit (the kv-store's transactionAsync
-    // sets a shared #_db on all map containers, which can collide with
-    // standalone writes like addContractInstance if they overlap).
-    await new Promise(resolve => setTimeout(resolve, 0));
     await wallet.getAccountManager(portable.type, secretKey, salt, signingKey);
     log.info(
       `Registered account ${portable.alias ?? portable.address} with PXE`,
@@ -378,13 +381,7 @@ async function bootstrapContactsFromCookie(
   let imported = 0;
   for (const contact of portableContacts) {
     const address = AztecAddress.fromBuffer(Buffer.from(contact.address));
-    // Yield to a new macro-task so the previous iteration's IndexedDB
-    // transaction fully commits (same issue as account bootstrap).
-    await new Promise(resolve => setTimeout(resolve, 0));
     await db.storeSender(address, contact.alias);
-    // Yield again before registerSender — it internally calls getAccounts()
-    // which iterates PXE's keystore, colliding with the storeSender tx above.
-    await new Promise(resolve => setTimeout(resolve, 0));
     await pxe.registerSender(address);
     imported++;
   }
