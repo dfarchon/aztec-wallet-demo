@@ -38,9 +38,11 @@ import {
   readAccountsCookie,
   writeContactsCookies,
   readContactsCookies,
+  writeCapabilitiesCookies,
+  readCapabilitiesCookies,
   type PortableAccount,
   type PortableContact,
-} from "./account-cookie.ts";
+} from "./sync-cookies.ts";
 
 const IS_IFRAME = typeof window !== "undefined" && window.self !== window.top;
 
@@ -79,6 +81,7 @@ function scheduleCookieSync(db: WalletDB): void {
     if (_cookieSyncDb && _cookiePassphrase && !IS_IFRAME) {
       await syncAccountsToCookie(_cookieSyncDb);
       await syncContactsToCookie(_cookieSyncDb);
+      await syncCapabilitiesToCookie(_cookieSyncDb);
     }
   }, 500);
 }
@@ -186,6 +189,7 @@ export async function getOrCreateSession(
       if (_cookiePassphrase && !IS_IFRAME) {
         await syncAccountsToCookie(db);
         await syncContactsToCookie(db);
+        await syncCapabilitiesToCookie(db);
       }
 
       return { pxe, node, db, pendingAuthorizations };
@@ -248,10 +252,11 @@ export async function getOrCreateSession(
       wireEvents(externalWallet);
       wireEvents(internalWallet);
 
-      // In iframe mode, bootstrap accounts and contacts from cookies into PXE.
+      // In iframe mode, bootstrap accounts, contacts, and capabilities from cookies.
       if (IS_IFRAME && _cookiePassphrase) {
         await bootstrapAccountsFromCookie(chainInfo, internalWallet);
         await bootstrapContactsFromCookie(internalWallet);
+        await bootstrapCapabilitiesFromCookie(sharedResources.db);
       }
 
       return { external: externalWallet, internal: internalWallet };
@@ -426,6 +431,52 @@ async function syncContactsToCookie(db: WalletDB): Promise<void> {
       `Failed to sync contacts to cookie: ${e}`,
     );
   }
+}
+
+/**
+ * Export all capability grants from WalletDB and write them to encrypted cookies.
+ * Called alongside syncAccountsToCookie/syncContactsToCookie.
+ * Standalone mode only — iframe never writes capabilities cookies.
+ */
+async function syncCapabilitiesToCookie(db: WalletDB): Promise<void> {
+  if (!_cookiePassphrase) return;
+
+  try {
+    const apps = await db.exportAllAuthorizations();
+    await writeCapabilitiesCookies(apps, _cookiePassphrase);
+    createLogger("wallet:cookie").info(
+      `Synced capabilities for ${apps.length} app(s) to encrypted cookies`,
+    );
+  } catch (e) {
+    createLogger("wallet:cookie").warn(
+      `Failed to sync capabilities to cookie: ${e}`,
+    );
+  }
+}
+
+/**
+ * Import capability grants from the encrypted cookies into the session's WalletDB.
+ * Used by the iframe to bootstrap dApp authorization state from the standalone wallet.
+ */
+async function bootstrapCapabilitiesFromCookie(db: WalletDB): Promise<number> {
+  const log = createLogger("wallet:cookie");
+
+  if (!_cookiePassphrase) {
+    log.warn("No passphrase set — cannot read capabilities cookies");
+    return 0;
+  }
+
+  const apps = await readCapabilitiesCookies(_cookiePassphrase);
+  if (apps.length === 0) {
+    log.info("No capabilities found in cookies");
+    return 0;
+  }
+
+  const imported = await db.importAllAuthorizations(apps);
+  log.info(
+    `Bootstrapped capabilities for ${apps.length} app(s) (${imported} entries) from cookies`,
+  );
+  return imported;
 }
 
 /** Returns the current sessions map (for debugging / UI inspection) */
