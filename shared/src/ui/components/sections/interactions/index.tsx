@@ -16,8 +16,10 @@ import {
   OutlinedInput,
   Checkbox,
   ListItemText,
+  IconButton,
+  Tooltip,
 } from "@mui/material";
-import { CheckCircle, Error as ErrorIcon } from "@mui/icons-material";
+import { CheckCircle, Error as ErrorIcon, ContentCopy as CopyIcon } from "@mui/icons-material";
 import type {
   WalletInteraction,
   WalletInteractionType,
@@ -131,6 +133,12 @@ const allInteractionTypes: WalletInteractionType[] = [
   "getContractClassMetadata",
   "requestCapabilities",
 ];
+
+/** Extract the TxHash from a sendTx interaction description (format: "TxHash: 0x...") */
+function extractTxHash(description: string): string | null {
+  const match = description.match(/TxHash:\s*(0x[a-fA-F0-9]+)/);
+  return match ? match[1] : null;
+}
 
 export function InteractionsList({
   interactions,
@@ -353,7 +361,32 @@ export function InteractionsList({
                     >
                       {interaction.title}
                     </Typography>
-                    {interaction.description && (
+                    {interaction.type === "sendTx" && extractTxHash(interaction.description) ? (
+                      <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
+                        <Typography
+                          variant="caption"
+                          color="text.secondary"
+                          sx={{
+                            fontFamily: "monospace",
+                            fontSize: "0.7rem",
+                          }}
+                        >
+                          TxHash: {extractTxHash(interaction.description)!.slice(0, 18)}...
+                        </Typography>
+                        <Tooltip title="Copy TxHash">
+                          <IconButton
+                            size="small"
+                            sx={{ p: 0.25 }}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              navigator.clipboard.writeText(extractTxHash(interaction.description)!);
+                            }}
+                          >
+                            <CopyIcon sx={{ fontSize: "0.8rem" }} />
+                          </IconButton>
+                        </Tooltip>
+                      </Box>
+                    ) : interaction.description ? (
                       <Typography
                         variant="caption"
                         color="text.secondary"
@@ -365,7 +398,7 @@ export function InteractionsList({
                       >
                         {interaction.description}
                       </Typography>
-                    )}
+                    ) : null}
                     <Typography
                       variant="caption"
                       color="text.secondary"
