@@ -377,6 +377,9 @@ async function bootstrapContactsFromCookie(
   let imported = 0;
   for (const contact of portableContacts) {
     const address = AztecAddress.fromBuffer(Buffer.from(contact.address));
+    // Yield to a new macro-task so the previous iteration's IndexedDB
+    // transaction fully commits (same issue as account bootstrap).
+    await new Promise(resolve => setTimeout(resolve, 0));
     // registerSender stores in DB + registers with PXE (idempotent)
     await wallet.registerSender(address, contact.alias);
     imported++;
