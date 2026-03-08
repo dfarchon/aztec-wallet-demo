@@ -70,7 +70,16 @@ export class InternalWallet extends BaseNativeWallet {
     // Store sender in database
     await this.db.storeSender(address, alias);
     // Register with PXE
-    return await this.pxe.registerSender(address);
+    const result = await this.pxe.registerSender(address);
+    // Emit wallet-update so cookie sync picks up the new contact
+    const interaction = WalletInteraction.from({
+      type: "registerSender",
+      status: "SUCCESS",
+      complete: true,
+      title: `Registered contact ${alias}`,
+    });
+    await this.interactionManager.storeAndEmit(interaction);
+    return result;
   }
 
   override async getAddressBook(): Promise<Aliased<AztecAddress>[]> {
