@@ -11,7 +11,7 @@ import { useState, useCallback, useEffect } from "react";
 import { Root } from "@demo-wallet/shared/ui";
 import { WalletApi } from "./utils/wallet-api.ts";
 import { PinDialog } from "./components/PinDialog.tsx";
-import { hasAccountsCookie, readAccountsCookie } from "../wallet/account-cookie.ts";
+import { hasAccountsCookie, readAccountsCookie } from "../wallet/sync-cookies.ts";
 import { setCookiePassphrase } from "../wallet/wallet-service.ts";
 
 export function StandaloneShell() {

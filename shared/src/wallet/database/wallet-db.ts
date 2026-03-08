@@ -1091,4 +1091,67 @@ export class WalletDB {
 
     return data;
   }
+
+  /**
+   * Export all authorization entries for all apps as a portable structure.
+   * Each app gets a record of storageKey → parsed JSON value.
+   * Used to sync capability grants to cookies.
+   */
+  async exportAllAuthorizations(): Promise<
+    Array<{ appId: string; entries: Record<string, unknown> }>
+  > {
+    // First, collect all app IDs
+    const appIds = await this.listAuthorizedApps();
+    const result: Array<{ appId: string; entries: Record<string, unknown> }> = [];
+
+    for (const appId of appIds) {
+      const prefix = `${appId}:`;
+      const entries: Record<string, unknown> = {};
+
+      for await (const [key, value] of this.authorizations.entriesAsync()) {
+        if (key.startsWith(prefix)) {
+          const storageKey = key.substring(prefix.length);
+          try {
+            entries[storageKey] = JSON.parse(value.toString());
+          } catch {
+            // If not valid JSON, store as raw string
+            entries[storageKey] = value.toString();
+          }
+        }
+      }
+
+      if (Object.keys(entries).length > 0) {
+        result.push({ appId, entries });
+      }
+    }
+
+    return result;
+  }
+
+  /**
+   * Import authorization entries from a portable structure into the DB.
+   * Additive: merges with existing entries (new entries overwrite conflicting keys).
+   * Used to bootstrap capability grants from cookies.
+   */
+  async importAllAuthorizations(
+    apps: Array<{ appId: string; entries: Record<string, unknown> }>,
+  ): Promise<number> {
+    let imported = 0;
+
+    for (const { appId, entries } of apps) {
+      for (const [storageKey, value] of Object.entries(entries)) {
+        const fullKey = `${appId}:${storageKey}`;
+        await this.authorizations.set(
+          fullKey,
+          Buffer.from(jsonStringify(value)),
+        );
+        imported++;
+      }
+    }
+
+    this.logger.info(
+      `Imported ${imported} authorization entries for ${apps.length} app(s)`,
+    );
+    return imported;
+  }
 }

@@ -57,7 +57,7 @@ import {
 import {
   hasAccountsCookie,
   readAccountsCookie,
-} from "../wallet/account-cookie.ts";
+} from "../wallet/sync-cookies.ts";
 import { EmojiVerification } from "./components/EmojiVerification.tsx";
 import { PinDialog } from "./components/PinDialog.tsx";
 import { Fr } from "@aztec/aztec.js/fields";

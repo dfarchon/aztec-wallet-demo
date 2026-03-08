@@ -3,14 +3,15 @@
  *
  * Browser storage (IndexedDB, localStorage) is permanently partitioned by
  * top-level origin for cross-origin iframes. `requestStorageAccess()` only
- * unpartitions **cookies**. We store account secrets and contacts in
- * unpartitioned cookies so the iframe can reconstruct wallet state.
+ * unpartitions **cookies**. We store account secrets, contacts, and capability
+ * grants in unpartitioned cookies so the iframe can reconstruct wallet state.
  *
  * SECURITY: All cookie payloads are encrypted with AES-256-GCM using a key
  * derived from a user passphrase via PBKDF2. The server only sees ciphertext.
  *
- * Accounts: `aztec-wallet-accounts` = base64(salt + iv + ciphertext(JSON))
- * Contacts: `aztec-wallet-contacts-{N}` = base64(salt + iv + ciphertext(binary))
+ * Accounts:     `aztec-wallet-accounts` = base64(salt + iv + ciphertext(JSON))
+ * Contacts:     `aztec-wallet-contacts-{N}` = base64(salt + iv + ciphertext(binary))
+ * Capabilities: `aztec-wallet-caps-{N}` = base64(salt + iv + ciphertext(JSON))
  *
  * Contacts use binary packing (32-byte raw addresses instead of 66-char hex)
  * and span multiple numbered cookies for practically unbounded storage.
@@ -18,6 +19,9 @@
  *
  * Contact binary format per entry: [32 bytes address] [1 byte alias len] [N bytes alias]
  * ~47 bytes per contact (with 14-char alias) → ~60 contacts per cookie → 600+ with 10 cookies.
+ *
+ * Capabilities store all per-app authorization entries (grants, __behavior__,
+ * __requested__) as JSON, using multi-cookie chunking for large manifests.
  *
  * Attributes: SameSite=None; Secure; Path=/; Max-Age=31536000 (1 year)
  */
@@ -352,6 +356,113 @@ export function hasContactsCookies(): boolean {
 export function clearContactsCookies(): void {
   for (let i = 0; ; i++) {
     const name = `${CONTACTS_COOKIE_PREFIX}${i}`;
+    if (!document.cookie.split("; ").some((c) => c.startsWith(`${name}=`))) break;
+    document.cookie = `${name}=; Path=/; Max-Age=0; SameSite=None; Secure`;
+  }
+}
+
+// ─── Capabilities (JSON, multi-cookie) ───
+
+/**
+ * Portable representation of all authorization data for one app.
+ * Carries capability grants, behavior settings, and requested-key history.
+ */
+export interface PortableAppCapabilities {
+  /** The application identifier (e.g. origin URL) */
+  appId: string;
+  /**
+   * Raw authorization entries keyed by storageKey (without the appId: prefix).
+   * Includes regular grant keys, __behavior__, and __requested__.
+   * Values are the JSON-parsed objects stored in WalletDB.authorizations.
+   */
+  entries: Record<string, unknown>;
+}
+
+const CAPS_COOKIE_PREFIX = "aztec-wallet-caps-";
+
+/**
+ * Write all apps' capability grants to encrypted multi-cookie storage.
+ * Old capability cookies beyond the new count are cleared.
+ */
+export async function writeCapabilitiesCookies(
+  apps: PortableAppCapabilities[],
+  passphrase: string,
+): Promise<void> {
+  const json = JSON.stringify(apps);
+  const plaintext = new TextEncoder().encode(json);
+  const chunks = chunkBytes(plaintext, MAX_PLAINTEXT_PER_CHUNK);
+
+  for (let i = 0; i < chunks.length; i++) {
+    const encrypted = await encryptBytes(chunks[i], passphrase);
+    const encoded = uint8ToBase64(encrypted);
+    document.cookie = [
+      `${CAPS_COOKIE_PREFIX}${i}=${encoded}`,
+      `Path=/`,
+      `Max-Age=${MAX_AGE}`,
+      `SameSite=None`,
+      `Secure`,
+    ].join("; ");
+  }
+
+  // Clear leftover cookies from a previous larger set
+  for (let i = chunks.length; ; i++) {
+    const name = `${CAPS_COOKIE_PREFIX}${i}`;
+    if (!document.cookie.split("; ").some((c) => c.startsWith(`${name}=`))) break;
+    document.cookie = `${name}=; Path=/; Max-Age=0; SameSite=None; Secure`;
+  }
+}
+
+/**
+ * Read and decrypt capability grants from all numbered cookies.
+ * Throws on wrong passphrase.
+ */
+export async function readCapabilitiesCookies(
+  passphrase: string,
+): Promise<PortableAppCapabilities[]> {
+  const allCookies = document.cookie.split("; ");
+  const chunks: Uint8Array[] = [];
+
+  for (let i = 0; ; i++) {
+    const name = `${CAPS_COOKIE_PREFIX}${i}`;
+    const match = allCookies.find((c) => c.startsWith(`${name}=`));
+    if (!match) break;
+    const encoded = match.split("=").slice(1).join("=");
+    const data = base64ToUint8(encoded);
+    chunks.push(await decryptBytes(data, passphrase));
+  }
+
+  if (chunks.length === 0) return [];
+
+  // Concatenate all decrypted chunks
+  const totalLen = chunks.reduce((sum, c) => sum + c.length, 0);
+  const combined = new Uint8Array(totalLen);
+  let offset = 0;
+  for (const chunk of chunks) {
+    combined.set(chunk, offset);
+    offset += chunk.length;
+  }
+
+  const json = new TextDecoder().decode(combined);
+  const parsed = JSON.parse(json);
+  if (!Array.isArray(parsed)) return [];
+  return parsed;
+}
+
+/**
+ * Check whether any capabilities cookies exist (without decrypting).
+ */
+export function hasCapabilitiesCookies(): boolean {
+  return document.cookie
+    .split("; ")
+    .some((c) => c.startsWith(`${CAPS_COOKIE_PREFIX}0=`));
+}
+
+/**
+ * Delete all capabilities cookies.
+ */
+export function clearCapabilitiesCookies(): void {
+  for (let i = 0; ; i++) {
+    const name = `${CAPS_COOKIE_PREFIX}${i}`;
     if (!document.cookie.split("; ").some((c) => c.startsWith(`${name}=`))) break;
     document.cookie = `${name}=; Path=/; Max-Age=0; SameSite=None; Secure`;
   }
