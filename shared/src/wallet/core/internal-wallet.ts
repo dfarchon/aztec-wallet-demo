@@ -12,6 +12,7 @@ import { type Fr } from "@aztec/aztec.js/fields";
 import type { AccountType } from "../database/wallet-db";
 import {
   WalletInteraction,
+  WalletUpdateEvent,
   type WalletInteractionType,
 } from "../types/wallet-interaction";
 
@@ -356,6 +357,7 @@ export class InternalWallet extends BaseNativeWallet {
     requestedCapabilities?: GrantedCapability[],
   ): Promise<void> {
     await this.db.storeCapabilityGrants(appId, granted, requestedCapabilities);
+    this.emitCapabilityChange();
   }
 
   async revokeCapability(
@@ -363,6 +365,7 @@ export class InternalWallet extends BaseNativeWallet {
     capability: GrantedCapability,
   ): Promise<void> {
     await this.db.revokeCapability(appId, capability);
+    this.emitCapabilityChange();
   }
 
   async updateAccountAuthorization(
@@ -370,6 +373,7 @@ export class InternalWallet extends BaseNativeWallet {
     accounts: Aliased<AztecAddress>[],
   ): Promise<void> {
     await this.db.updateAccountAuthorization(appId, accounts);
+    this.emitCapabilityChange();
   }
 
   async updateAddressBookAuthorization(
@@ -377,13 +381,32 @@ export class InternalWallet extends BaseNativeWallet {
     contacts: Aliased<AztecAddress>[],
   ): Promise<void> {
     await this.db.updateAddressBookAuthorization(appId, contacts);
+    this.emitCapabilityChange();
   }
 
   async revokeAuthorization(key: string): Promise<void> {
     await this.db.revokeAuthorization(key);
+    this.emitCapabilityChange();
   }
 
   async revokeAppAuthorizations(appId: string): Promise<void> {
     await this.db.revokeAppAuthorizations(appId);
+    this.emitCapabilityChange();
+  }
+
+  /**
+   * Emit a wallet-update event so cookie sync picks up capability changes
+   * made through the Apps tab UI (storeCapabilityGrants, revoke, etc.).
+   */
+  private emitCapabilityChange(): void {
+    const interaction = WalletInteraction.from({
+      type: "capabilityChange" as any,
+      status: "SUCCESS",
+      complete: true,
+      title: "Capability change",
+    });
+    this.interactionManager.dispatchEvent(
+      new WalletUpdateEvent(interaction),
+    );
   }
 }

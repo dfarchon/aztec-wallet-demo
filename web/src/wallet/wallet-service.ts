@@ -382,6 +382,9 @@ async function bootstrapContactsFromCookie(
     // transaction fully commits (same issue as account bootstrap).
     await new Promise(resolve => setTimeout(resolve, 0));
     await db.storeSender(address, contact.alias);
+    // Yield again before registerSender — it internally calls getAccounts()
+    // which iterates PXE's keystore, colliding with the storeSender tx above.
+    await new Promise(resolve => setTimeout(resolve, 0));
     await pxe.registerSender(address);
     imported++;
   }

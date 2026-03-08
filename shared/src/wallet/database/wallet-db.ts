@@ -1160,33 +1160,46 @@ export class WalletDB {
 
   /**
    * Import authorization entries from a portable structure into the DB.
-   * Additive: merges with existing entries (new entries overwrite conflicting keys).
-   * Used to bootstrap capability grants from cookies.
+   * Full overwrite: replaces local entries with cookie data for each app present in the import.
+   * Keys present in the cookie but missing locally are created.
+   * Keys present locally but missing in the cookie are deleted (the cookie is authoritative).
+   * Used to bootstrap capability grants from cookies at PXE init.
    */
   async importAllAuthorizations(
     apps: Array<{ appId: string; entries: Record<string, unknown> }>,
   ): Promise<number> {
-    let imported = 0;
+    let updated = 0;
 
     for (const { appId, entries } of apps) {
+      const prefix = `${appId}:`;
+
+      // Collect existing keys for this app so we can delete stale ones
+      const existingKeys = new Set<string>();
+      for await (const key of this.authorizations.keysAsync({ start: prefix, end: `${prefix}\uffff` })) {
+        existingKeys.add(key);
+      }
+
+      // Write all entries from the cookie
       for (const [storageKey, value] of Object.entries(entries)) {
         const fullKey = `${appId}:${storageKey}`;
-        // Only import keys that don't already exist locally.
-        // This prevents stale cookie data from overwriting local revocations.
-        const existing = await this.authorizations.getAsync(fullKey);
-        if (!existing) {
-          await this.authorizations.set(
-            fullKey,
-            Buffer.from(jsonStringify(value)),
-          );
-          imported++;
-        }
+        await this.authorizations.set(
+          fullKey,
+          Buffer.from(jsonStringify(value)),
+        );
+        existingKeys.delete(fullKey); // Mark as seen
+        updated++;
+      }
+
+      // Delete local keys that are no longer in the cookie (revoked on the other side)
+      for (const staleKey of existingKeys) {
+        await this.authorizations.delete(staleKey);
+        updated++;
       }
     }
 
     this.logger.info(
-      `Imported ${imported} new authorization entries for ${apps.length} app(s)`,
+      `Imported authorization data for ${apps.length} app(s) (${updated} entries processed)`,
     );
-    return imported;
+    return updated;
   }
 }
