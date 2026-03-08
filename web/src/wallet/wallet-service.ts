@@ -12,7 +12,7 @@
  * - Logger uses createLogger directly (no proxy logger needed)
  */
 
-import { createAztecNodeClient } from "@aztec/aztec.js/node";
+import { createAztecNodeClient, type AztecNode } from "@aztec/aztec.js/node";
 import { type ChainInfo } from "@aztec/aztec.js/account";
 import { Fr } from "@aztec/aztec.js/fields";
 import { AztecAddress } from "@aztec/aztec.js/addresses";
@@ -29,6 +29,7 @@ import {
 import {
   createPXE,
   getPXEConfig,
+  type PXE,
   type PXEConfig,
   type PXECreationOptions,
 } from "@aztec/pxe/client/lazy";
@@ -48,8 +49,8 @@ const IS_IFRAME = typeof window !== "undefined" && window.self !== window.top;
 
 type SessionData = {
   sharedResources: Promise<{
-    pxe: any;
-    node: any;
+    pxe: PXE;
+    node: AztecNode;
     db: WalletDB;
     pendingAuthorizations: Map<
       string,
@@ -269,7 +270,7 @@ export async function getOrCreateSession(
       // (Capabilities are bootstrapped at PXE init for both modes.)
       if (IS_IFRAME && _cookiePassphrase) {
         await bootstrapAccountsFromCookie(chainInfo, internalWallet);
-        await bootstrapContactsFromCookie(internalWallet);
+        await bootstrapContactsFromCookie(sharedResources.db, sharedResources.pxe);
       }
 
       return { external: externalWallet, internal: internalWallet };
@@ -355,11 +356,13 @@ export async function bootstrapAccountsFromCookie(
 
 /**
  * Import contacts from the encrypted cookies into the session's WalletDB
- * and register them as senders with PXE (via InternalWallet.registerSender).
- * Used by the iframe to bootstrap contacts from the standalone wallet.
+ * and register them as senders with PXE.
+ * Bypasses InternalWallet.registerSender to avoid emitting interaction events
+ * for each bootstrapped contact (which would clutter the interaction history).
  */
 async function bootstrapContactsFromCookie(
-  wallet: InternalWallet,
+  db: WalletDB,
+  pxe: PXE,
 ): Promise<number> {
   const log = createLogger("wallet:cookie");
 
@@ -380,8 +383,8 @@ async function bootstrapContactsFromCookie(
     // Yield to a new macro-task so the previous iteration's IndexedDB
     // transaction fully commits (same issue as account bootstrap).
     await new Promise(resolve => setTimeout(resolve, 0));
-    // registerSender stores in DB + registers with PXE (idempotent)
-    await wallet.registerSender(address, contact.alias);
+    await db.storeSender(address, contact.alias);
+    await pxe.registerSender(address);
     imported++;
   }
 
@@ -505,8 +508,8 @@ export function getRunningSessionIds(): string[] {
  * Used by the UI wallet-api to resolve authorization requests directly.
  */
 export async function getSharedResources(chainInfo: ChainInfo): Promise<{
-  pxe: any;
-  node: any;
+  pxe: PXE;
+  node: AztecNode;
   db: WalletDB;
   pendingAuthorizations: Map<
     string,
