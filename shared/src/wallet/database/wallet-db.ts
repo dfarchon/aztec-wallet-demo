@@ -701,34 +701,75 @@ export class WalletDB {
       } as any); // GrantedAccountsCapability
     }
 
-    // Reconstruct ContractsCapability (group by register/metadata)
+    // Reconstruct ContractsCapability with per-contract permission granularity.
+    // Produce separate capabilities for each permission combination so that
+    // capabilityToStorageKeys round-trips accurately (e.g. a contract with only
+    // register doesn't get a phantom metadata key).
     if (contractKeys.length > 0) {
-      const registerKeys = contractKeys.filter((k) =>
-        k.startsWith("registerContract:"),
+      const registerAddrs = new Set(
+        contractKeys
+          .filter((k) => k.startsWith("registerContract:"))
+          .map((k) => k.split(":")[1]),
       );
-      const metadataKeys = contractKeys.filter((k) =>
-        k.startsWith("getContractMetadata:"),
+      const metadataAddrs = new Set(
+        contractKeys
+          .filter((k) => k.startsWith("getContractMetadata:"))
+          .map((k) => k.split(":")[1]),
       );
 
-      // Extract unique contract addresses
-      const registerAddrs = new Set(registerKeys.map((k) => k.split(":")[1]));
-      const metadataAddrs = new Set(metadataKeys.map((k) => k.split(":")[1]));
+      // Check for wildcards
+      const hasRegisterWild = registerAddrs.has("*");
+      const hasMetadataWild = metadataAddrs.has("*");
 
-      // Combine into single capability
-      const allAddrs = new Set([...registerAddrs, ...metadataAddrs]);
+      if (hasRegisterWild || hasMetadataWild) {
+        // Wildcard case — single capability
+        capabilities.push({
+          type: "contracts",
+          contracts: "*" as const,
+          canRegister: hasRegisterWild,
+          canGetMetadata: hasMetadataWild,
+        });
+      } else {
+        // Group addresses by their permission signature
+        const allAddrs = new Set([...registerAddrs, ...metadataAddrs]);
+        const bothAddrs: AztecAddress[] = [];
+        const registerOnlyAddrs: AztecAddress[] = [];
+        const metadataOnlyAddrs: AztecAddress[] = [];
 
-      const contracts = allAddrs.has("*")
-        ? ("*" as const)
-        : Array.from(allAddrs)
-            .filter((a) => a !== "*")
-            .map((a) => AztecAddress.fromString(a));
+        for (const a of allAddrs) {
+          const hasReg = registerAddrs.has(a);
+          const hasMeta = metadataAddrs.has(a);
+          const addr = AztecAddress.fromString(a);
+          if (hasReg && hasMeta) bothAddrs.push(addr);
+          else if (hasReg) registerOnlyAddrs.push(addr);
+          else metadataOnlyAddrs.push(addr);
+        }
 
-      capabilities.push({
-        type: "contracts",
-        contracts,
-        canRegister: registerKeys.length > 0,
-        canGetMetadata: metadataKeys.length > 0,
-      });
+        if (bothAddrs.length > 0) {
+          capabilities.push({
+            type: "contracts",
+            contracts: bothAddrs,
+            canRegister: true,
+            canGetMetadata: true,
+          });
+        }
+        if (registerOnlyAddrs.length > 0) {
+          capabilities.push({
+            type: "contracts",
+            contracts: registerOnlyAddrs,
+            canRegister: true,
+            canGetMetadata: false,
+          });
+        }
+        if (metadataOnlyAddrs.length > 0) {
+          capabilities.push({
+            type: "contracts",
+            contracts: metadataOnlyAddrs,
+            canRegister: false,
+            canGetMetadata: true,
+          });
+        }
+      }
     }
 
     // Reconstruct ContractClassesCapability

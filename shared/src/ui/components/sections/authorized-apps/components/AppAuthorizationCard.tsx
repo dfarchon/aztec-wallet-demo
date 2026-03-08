@@ -102,10 +102,24 @@ export function AppAuthorizationCard({
 
       // Build the fake request once with all data
       if (result.requested.length > 0) {
+        // Merge granted account data into the requested capabilities so the
+        // UI initialises checkboxes from the *currently granted* accounts
+        // rather than from the (cumulative) requested list.
+        const grantedAccountsCap = result.granted.find(
+          (c) => c.type === "accounts",
+        ) as GrantedCapability & { accounts?: unknown[] } | undefined;
+
+        const mergedCapabilities = result.requested.map((cap) => {
+          if (cap.type === "accounts" && grantedAccountsCap) {
+            return { ...cap, accounts: grantedAccountsCap.accounts ?? [] };
+          }
+          return cap;
+        });
+
         const manifest: AppCapabilities = {
           version: "1.0" as typeof CAPABILITY_VERSION,
           metadata: { name: appId, version: "1.0.0" },
-          capabilities: result.requested as unknown as Capability[],
+          capabilities: mergedCapabilities as unknown as Capability[],
         };
 
         setFakeRequest({
