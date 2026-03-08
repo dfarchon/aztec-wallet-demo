@@ -587,12 +587,10 @@ export class WalletDB {
    */
   async revokeAllCapabilities(appId: string): Promise<void> {
     const keysToDelete: string[] = [];
+    const prefix = `${appId}:`;
 
-    // Collect all keys for this app
-    for await (const [key, _] of this.authorizations.entriesAsync()) {
-      if (key.startsWith(`${appId}:`)) {
-        keysToDelete.push(key);
-      }
+    for await (const key of this.authorizations.keysAsync({ start: prefix, end: `${prefix}\uffff` })) {
+      keysToDelete.push(key);
     }
 
     // Delete all keys
@@ -616,13 +614,12 @@ export class WalletDB {
     appId: string,
   ): Promise<GrantedCapability[]> {
     // Collect all authorization keys for this app (excluding metadata)
+    const prefix = `${appId}:`;
     const keys: string[] = [];
-    for await (const [key, _] of this.authorizations.entriesAsync()) {
-      if (key.startsWith(`${appId}:`)) {
-        const storageKey = key.substring(appId.length + 1);
-        if (!storageKey.startsWith("__")) {
-          keys.push(storageKey);
-        }
+    for await (const key of this.authorizations.keysAsync({ start: prefix, end: `${prefix}\uffff` })) {
+      const storageKey = key.substring(prefix.length);
+      if (!storageKey.startsWith("__")) {
+        keys.push(storageKey);
       }
     }
 
@@ -905,7 +902,7 @@ export class WalletDB {
   async listAuthorizedApps(): Promise<string[]> {
     const appIds = new Set<string>();
     const MARKERS = [":__requested__", ":__behavior__"];
-    for await (const [key, _] of this.authorizations.entriesAsync()) {
+    for await (const key of this.authorizations.keysAsync()) {
       for (const marker of MARKERS) {
         if (key.endsWith(marker)) {
           appIds.add(key.slice(0, -marker.length));
@@ -959,10 +956,8 @@ export class WalletDB {
   async revokeAppAuthorizations(appId: string) {
     const prefix = `${appId}:`;
     const keysToDelete: string[] = [];
-    for await (const [key, _] of this.authorizations.entriesAsync()) {
-      if (key.startsWith(prefix)) {
-        keysToDelete.push(key);
-      }
+    for await (const key of this.authorizations.keysAsync({ start: prefix, end: `${prefix}\uffff` })) {
+      keysToDelete.push(key);
     }
 
     for (const key of keysToDelete) {
@@ -1062,11 +1057,8 @@ export class WalletDB {
   async getAllAuthorizationKeys(appId: string): Promise<string[]> {
     const prefix = `${appId}:`;
     const keys: string[] = [];
-    for await (const [key] of this.authorizations.entriesAsync()) {
-      const keyStr = key.toString();
-      if (keyStr.startsWith(prefix)) {
-        keys.push(keyStr.substring(prefix.length)); // Remove appId prefix
-      }
+    for await (const key of this.authorizations.keysAsync({ start: prefix, end: `${prefix}\uffff` })) {
+      keys.push(key.substring(prefix.length));
     }
     return keys;
   }
@@ -1149,15 +1141,12 @@ export class WalletDB {
       const prefix = `${appId}:`;
       const entries: Record<string, unknown> = {};
 
-      for await (const [key, value] of this.authorizations.entriesAsync()) {
-        if (key.startsWith(prefix)) {
-          const storageKey = key.substring(prefix.length);
-          try {
-            entries[storageKey] = JSON.parse(value.toString());
-          } catch {
-            // If not valid JSON, store as raw string
-            entries[storageKey] = value.toString();
-          }
+      for await (const [key, value] of this.authorizations.entriesAsync({ start: prefix, end: `${prefix}\uffff` })) {
+        const storageKey = key.substring(prefix.length);
+        try {
+          entries[storageKey] = JSON.parse(value.toString());
+        } catch {
+          entries[storageKey] = value.toString();
         }
       }
 
@@ -1182,16 +1171,21 @@ export class WalletDB {
     for (const { appId, entries } of apps) {
       for (const [storageKey, value] of Object.entries(entries)) {
         const fullKey = `${appId}:${storageKey}`;
-        await this.authorizations.set(
-          fullKey,
-          Buffer.from(jsonStringify(value)),
-        );
-        imported++;
+        // Only import keys that don't already exist locally.
+        // This prevents stale cookie data from overwriting local revocations.
+        const existing = await this.authorizations.getAsync(fullKey);
+        if (!existing) {
+          await this.authorizations.set(
+            fullKey,
+            Buffer.from(jsonStringify(value)),
+          );
+          imported++;
+        }
       }
     }
 
     this.logger.info(
-      `Imported ${imported} authorization entries for ${apps.length} app(s)`,
+      `Imported ${imported} new authorization entries for ${apps.length} app(s)`,
     );
     return imported;
   }
