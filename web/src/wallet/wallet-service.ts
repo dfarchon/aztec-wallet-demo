@@ -65,6 +65,24 @@ type SessionData = {
 
 const RUNNING_SESSIONS = new Map<string, SessionData>();
 
+// ─── Debounced cookie sync ───
+// A single timer across all wallet-update events. Prevents redundant PBKDF2
+// derivations when multiple events fire in quick succession.
+let _cookieSyncTimer: ReturnType<typeof setTimeout> | null = null;
+let _cookieSyncDb: WalletDB | null = null;
+
+function scheduleCookieSync(db: WalletDB): void {
+  _cookieSyncDb = db;
+  if (_cookieSyncTimer) return; // already scheduled
+  _cookieSyncTimer = setTimeout(async () => {
+    _cookieSyncTimer = null;
+    if (_cookieSyncDb && _cookiePassphrase && !IS_IFRAME) {
+      await syncAccountsToCookie(_cookieSyncDb);
+      await syncContactsToCookie(_cookieSyncDb);
+    }
+  }, 500);
+}
+
 // ─── Passphrase management ───
 // Held in memory only — never persisted. Must be set before cookie operations.
 let _cookiePassphrase: string | null = null;
@@ -211,12 +229,7 @@ export async function getOrCreateSession(
       const wireEvents = (wallet: ExternalWallet | InternalWallet) => {
         wallet.addEventListener("wallet-update", (event: Event) => {
           onWalletEvent("wallet-update", (event as CustomEvent).detail);
-          // Re-sync to cookies on every wallet update (standalone only).
-          // Iframe never writes — it's read-only.
-          if (_cookiePassphrase && !IS_IFRAME) {
-            syncAccountsToCookie(sharedResources.db);
-            syncContactsToCookie(sharedResources.db);
-          }
+          scheduleCookieSync(sharedResources.db);
         });
         wallet.addEventListener("authorization-request", (event: Event) => {
           onWalletEvent("authorization-request", (event as CustomEvent).detail);
@@ -305,8 +318,11 @@ export async function bootstrapAccountsFromCookie(
     }
 
     // Register with PXE via the wallet's getAccountManager (idempotent).
-    // This creates the account contract, registers the artifact/instance,
-    // and registers the secret key so PXE can derive keys and decrypt notes.
+    // Yield to a new macro-task between registrations so IndexedDB transactions
+    // from the previous iteration fully commit (the kv-store's transactionAsync
+    // sets a shared #_db on all map containers, which can collide with
+    // standalone writes like addContractInstance if they overlap).
+    await new Promise(resolve => setTimeout(resolve, 0));
     await wallet.getAccountManager(portable.type, secretKey, salt, signingKey);
     log.info(
       `Registered account ${portable.alias ?? portable.address} with PXE`,
