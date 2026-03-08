@@ -78,9 +78,15 @@ function scheduleCookieSync(db: WalletDB): void {
   if (_cookieSyncTimer) return; // already scheduled
   _cookieSyncTimer = setTimeout(async () => {
     _cookieSyncTimer = null;
-    if (_cookieSyncDb && _cookiePassphrase && !IS_IFRAME) {
-      await syncAccountsToCookie(_cookieSyncDb);
-      await syncContactsToCookie(_cookieSyncDb);
+    if (_cookieSyncDb && _cookiePassphrase) {
+      // Accounts and contacts are standalone-only (source of truth).
+      if (!IS_IFRAME) {
+        await syncAccountsToCookie(_cookieSyncDb);
+        await syncContactsToCookie(_cookieSyncDb);
+      }
+      // Capabilities sync bidirectionally — grants made in the iframe
+      // (via requestCapabilities from the dApp) must propagate back to
+      // the standalone wallet's Authorized Apps view.
       await syncCapabilitiesToCookie(_cookieSyncDb);
     }
   }, 500);
@@ -184,11 +190,18 @@ export async function getOrCreateSession(
         }
       >();
 
-      // Initial sync: write existing data to cookies (standalone mode only).
-      // The iframe must NEVER overwrite cookies — it's read-only.
-      if (_cookiePassphrase && !IS_IFRAME) {
-        await syncAccountsToCookie(db);
-        await syncContactsToCookie(db);
+      if (_cookiePassphrase) {
+        // Capabilities sync bidirectionally: import from cookies first so
+        // grants made in the iframe are merged into WalletDB, then export
+        // the combined state back.
+        await bootstrapCapabilitiesFromCookie(db);
+
+        if (!IS_IFRAME) {
+          // Accounts and contacts are standalone-only (source of truth).
+          await syncAccountsToCookie(db);
+          await syncContactsToCookie(db);
+        }
+        // Re-export the merged capabilities (includes both local + cookie grants).
         await syncCapabilitiesToCookie(db);
       }
 
@@ -252,11 +265,11 @@ export async function getOrCreateSession(
       wireEvents(externalWallet);
       wireEvents(internalWallet);
 
-      // In iframe mode, bootstrap accounts, contacts, and capabilities from cookies.
+      // In iframe mode, bootstrap accounts and contacts from cookies into PXE.
+      // (Capabilities are bootstrapped at PXE init for both modes.)
       if (IS_IFRAME && _cookiePassphrase) {
         await bootstrapAccountsFromCookie(chainInfo, internalWallet);
         await bootstrapContactsFromCookie(internalWallet);
-        await bootstrapCapabilitiesFromCookie(sharedResources.db);
       }
 
       return { external: externalWallet, internal: internalWallet };
