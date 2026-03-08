@@ -80,14 +80,13 @@ function scheduleCookieSync(db: WalletDB): void {
   _cookieSyncTimer = setTimeout(async () => {
     _cookieSyncTimer = null;
     if (_cookieSyncDb && _cookiePassphrase) {
-      // Accounts and contacts are standalone-only (source of truth).
       if (!IS_IFRAME) {
+        // Accounts and contacts are standalone-only (source of truth).
         await syncAccountsToCookie(_cookieSyncDb);
         await syncContactsToCookie(_cookieSyncDb);
       }
-      // Capabilities sync bidirectionally — grants made in the iframe
-      // (via requestCapabilities from the dApp) must propagate back to
-      // the standalone wallet's Authorized Apps view.
+      // Capabilities sync bidirectionally — both standalone and iframe
+      // write the cookie after every modification.
       await syncCapabilitiesToCookie(_cookieSyncDb);
     }
   }, 500);
@@ -192,9 +191,8 @@ export async function getOrCreateSession(
       >();
 
       if (_cookiePassphrase) {
-        // Capabilities sync bidirectionally: import from cookies first so
-        // grants made in the iframe are merged into WalletDB, then export
-        // the combined state back.
+        // Import capabilities from cookie first (additive-only: won't overwrite
+        // local state, only adds entries missing locally).
         await bootstrapCapabilitiesFromCookie(db);
 
         if (!IS_IFRAME) {
@@ -202,7 +200,7 @@ export async function getOrCreateSession(
           await syncAccountsToCookie(db);
           await syncContactsToCookie(db);
         }
-        // Re-export the merged capabilities (includes both local + cookie grants).
+        // Export capabilities to cookie (includes both local + newly imported).
         await syncCapabilitiesToCookie(db);
       }
 
