@@ -220,6 +220,111 @@ describe("requested vs granted separation", () => {
   });
 });
 
+describe("capability removal round-trips", () => {
+  it("removing contract metadata for one contract doesn't affect others", async () => {
+    // Grant register + metadata for both contracts
+    const cap = {
+      type: "contracts",
+      contracts: [addr1, addr2],
+      canRegister: true,
+      canGetMetadata: true,
+    } as any;
+    await db.storeCapabilityGrants(APP_ID, [cap]);
+
+    // Simulate UI removing metadata for addr1: delete the key directly
+    await db.revokeAuthorization(`${APP_ID}:getContractMetadata:${addr1.toString()}`);
+
+    // Re-store only what remains (register for both, metadata for addr2 only)
+    const newCaps = [
+      { type: "contracts", contracts: [addr1, addr2], canRegister: true, canGetMetadata: false } as any,
+      { type: "contracts", contracts: [addr2], canRegister: false, canGetMetadata: true } as any,
+    ];
+    await db.storeCapabilityGrants(APP_ID, newCaps);
+
+    // Reconstruct and verify round-trip
+    const granted = await db.reconstructCapabilitiesFromKeys(APP_ID);
+    const allKeys = granted.flatMap((c) => db.capabilityToStorageKeys(c));
+
+    expect(allKeys).toContain(`registerContract:${addr1.toString()}`);
+    expect(allKeys).toContain(`registerContract:${addr2.toString()}`);
+    expect(allKeys).not.toContain(`getContractMetadata:${addr1.toString()}`);
+    expect(allKeys).toContain(`getContractMetadata:${addr2.toString()}`);
+  });
+
+  it("removing one account preserves remaining accounts in data blob", async () => {
+    const cap = {
+      type: "accounts",
+      canGet: true,
+      canCreateAuthWit: false,
+      accounts: [
+        { alias: "Account 1", item: addr1 },
+        { alias: "Account 2", item: addr2 },
+      ],
+    } as any;
+    await db.storeCapabilityGrants(APP_ID, [cap]);
+
+    // Now re-store with only addr1
+    const updatedCap = {
+      type: "accounts",
+      canGet: true,
+      canCreateAuthWit: false,
+      accounts: [{ alias: "Account 1", item: addr1 }],
+    } as any;
+    await db.storeCapabilityGrants(APP_ID, [updatedCap]);
+
+    // Reconstruct
+    const granted = await db.reconstructCapabilitiesFromKeys(APP_ID);
+    const accountsCap = granted.find((c) => c.type === "accounts") as any;
+    expect(accountsCap).toBeDefined();
+    expect(accountsCap.accounts).toHaveLength(1);
+    expect(accountsCap.accounts[0].item.toString()).toBe(addr1.toString());
+  });
+
+  it("reconstruct → toKeys round-trip is lossless for per-contract permissions", async () => {
+    // Store mixed permissions: addr1 has register only, addr2 has both
+    await db.storePersistentAuthorization(
+      APP_ID, `registerContract:${addr1.toString()}`, { persistent: true },
+    );
+    await db.storePersistentAuthorization(
+      APP_ID, `registerContract:${addr2.toString()}`, { persistent: true },
+    );
+    await db.storePersistentAuthorization(
+      APP_ID, `getContractMetadata:${addr2.toString()}`, { persistent: true },
+    );
+
+    const granted = await db.reconstructCapabilitiesFromKeys(APP_ID);
+    const roundTrippedKeys = new Set(
+      granted.flatMap((c) => db.capabilityToStorageKeys(c)),
+    );
+
+    expect(roundTrippedKeys.has(`registerContract:${addr1.toString()}`)).toBe(true);
+    expect(roundTrippedKeys.has(`registerContract:${addr2.toString()}`)).toBe(true);
+    expect(roundTrippedKeys.has(`getContractMetadata:${addr2.toString()}`)).toBe(true);
+    // addr1 should NOT have metadata key
+    expect(roundTrippedKeys.has(`getContractMetadata:${addr1.toString()}`)).toBe(false);
+  });
+
+  it("reconstruct → toKeys round-trip handles simulation removal", async () => {
+    const simCap = {
+      type: "simulation",
+      transactions: { scope: [
+        { contract: addr1, function: "swap" },
+        { contract: addr2, function: "transfer" },
+      ] },
+    } as any;
+    await db.storeCapabilityGrants(APP_ID, [simCap]);
+
+    // Remove one simulation pattern
+    await db.revokeAuthorization(`${APP_ID}:simulateTx:${addr1.toString()}:swap`);
+
+    const granted = await db.reconstructCapabilitiesFromKeys(APP_ID);
+    const allKeys = granted.flatMap((c) => db.capabilityToStorageKeys(c));
+
+    expect(allKeys).not.toContain(`simulateTx:${addr1.toString()}:swap`);
+    expect(allKeys).toContain(`simulateTx:${addr2.toString()}:transfer`);
+  });
+});
+
 describe("metadata preservation", () => {
   it("preserves __behavior__ and __requested__ across storeCapabilityGrants", async () => {
     await db.storeAppAuthorizationBehavior(APP_ID, "strict", 86400000);
