@@ -346,23 +346,9 @@ export class SendTxOperation<
 
     const sendingTime = Date.now() - sendingStartTime;
 
-    // Helper to format duration
-    const formatDuration = (ms: number | undefined): string => {
-      if (!ms) return "0ms";
-      if (ms < 1000) return `${Math.round(ms)}ms`;
-      return `${(ms / 1000).toFixed(1)}s`;
-    };
-
-    const provingTime = rawStats.timings.proving;
-    const witgenTime = rawStats.timings.perFunction.reduce(
-      (acc, fn) => acc + fn.time,
-      0,
-    );
-
     // If wait is NO_WAIT, return txHash immediately
     if (executionData.wait === NO_WAIT) {
-      const timingSummary = `Witgen: ${formatDuration(witgenTime)} | Prove: ${formatDuration(provingTime)} | Send: ${formatDuration(sendingTime)}`;
-      await this.emitProgress("SENT", timingSummary, true);
+      await this.emitProgress("SENT", `TxHash: ${txHash.toString()}`, true);
       const enrichedStats = { ...rawStats, timings: { ...rawStats.timings, simulation: executionData.simulationTime, sending: sendingTime } };
       await this.db.updateTxPayloadStats(executionData.payloadHash, enrichedStats);
       return txHash as SendTxResult<W>;
@@ -376,8 +362,7 @@ export class SendTxOperation<
     const receipt = await waitForTx(this.aztecNode, txHash, waitOpts);
     const miningTime = Date.now() - miningStartTime;
 
-    const timingSummary = `Witgen: ${formatDuration(witgenTime)} | Prove: ${formatDuration(provingTime)} | Send: ${formatDuration(sendingTime)} | Mine: ${formatDuration(miningTime)}`;
-    await this.emitProgress("SENT", timingSummary, true);
+    await this.emitProgress("SENT", `TxHash: ${txHash.toString()}`, true);
 
     const enrichedStats = { ...rawStats, timings: { ...rawStats.timings, simulation: executionData.simulationTime, sending: sendingTime, mining: miningTime } };
     await this.db.updateTxPayloadStats(executionData.payloadHash, enrichedStats);

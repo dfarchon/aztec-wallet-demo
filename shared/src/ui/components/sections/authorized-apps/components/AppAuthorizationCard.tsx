@@ -165,25 +165,30 @@ export function AppAuthorizationCard({
       try {
         setSaving(true);
 
-        // Build new granted keys set
+        // Build old and new key sets for diffing
+        const oldGrantedKeys = new Set<string>();
+        for (const cap of grantedRef.current) {
+          const keys = await walletAPI.capabilityToStorageKeys(cap);
+          for (const key of keys) oldGrantedKeys.add(key);
+        }
+
         const newGrantedKeys = new Set<string>();
         for (const cap of data.granted) {
           const keys = await walletAPI.capabilityToStorageKeys(cap);
           for (const key of keys) newGrantedKeys.add(key);
         }
 
-        // Store all newly granted capabilities (additive upsert)
-        if (data.granted.length > 0) {
-          await walletAPI.storeCapabilityGrants(appId, data.granted);
+        // Delete individual keys that were removed (not entire capabilities)
+        for (const key of oldGrantedKeys) {
+          if (!newGrantedKeys.has(key)) {
+            await walletAPI.revokeAuthorization(`${appId}:${key}`);
+          }
         }
 
-        // Revoke capabilities that were previously granted but no longer in the new set
-        for (const cap of grantedRef.current) {
-          const keys = await walletAPI.capabilityToStorageKeys(cap);
-          const allStillGranted = keys.every((k) => newGrantedKeys.has(k));
-          if (!allStillGranted) {
-            await walletAPI.revokeCapability(appId, cap);
-          }
+        // Store all newly granted capabilities (additive upsert).
+        // This also overwrites capability data blobs (e.g. account lists).
+        if (data.granted.length > 0) {
+          await walletAPI.storeCapabilityGrants(appId, data.granted);
         }
 
         // Update ref (not state — no re-render needed)
