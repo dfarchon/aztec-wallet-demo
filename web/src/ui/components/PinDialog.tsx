@@ -107,12 +107,12 @@ export function PinDialog({ mode, error, onSubmit }: PinDialogProps) {
           value={pin}
           onChange={(e) => setPin(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === "Enter") {
+            if (e.key === "Enter" && e.isTrusted) {
               if (mode === "set" && !confirm) return;
               handleSubmit();
             }
           }}
-          inputProps={{ minLength: 6, maxLength: 32 }}
+          inputProps={{ minLength: 6, maxLength: 32, autoComplete: "off" }}
           fullWidth
           size="small"
           sx={textFieldSx}
@@ -125,9 +125,9 @@ export function PinDialog({ mode, error, onSubmit }: PinDialogProps) {
             value={confirm}
             onChange={(e) => setConfirm(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === "Enter") handleSubmit();
+              if (e.key === "Enter" && e.isTrusted) handleSubmit();
             }}
-            inputProps={{ minLength: 6, maxLength: 32 }}
+            inputProps={{ minLength: 6, maxLength: 32, autoComplete: "off" }}
             fullWidth
             size="small"
             sx={textFieldSx}
