@@ -386,16 +386,8 @@ function IframeContent() {
             ? rawVersion
             : Fr.fromString(String(rawVersion));
 
-        // Ensure storage access for cookies before PXE init
-        if (document.requestStorageAccess) {
-          try {
-            await document.requestStorageAccess();
-          } catch {
-            /* already granted or not needed */
-          }
-        }
-
         // Wait for the user to enter the PIN before proceeding.
+        // Storage access is already granted during handlePinSubmit (user gesture).
         // This blocks until handlePinSubmit resolves the gate.
         await pinGateRef.current.promise;
 
