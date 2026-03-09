@@ -243,20 +243,25 @@ export async function getOrCreateSession(
       const wireEvents = (wallet: ExternalWallet | InternalWallet) => {
         wallet.addEventListener("wallet-update", (event: Event) => {
           const detail = (event as CustomEvent).detail;
-          onWalletEvent("wallet-update", detail);
 
           // Sync only the relevant cookie based on the interaction type.
+          let type: string | undefined;
           try {
-            const parsed = JSON.parse(detail);
-            const type = parsed?.type;
-            if (!IS_IFRAME && type === "createAccount") {
-              scheduleAccountSync(sharedResources.db);
-            } else if (!IS_IFRAME && type === "registerSender") {
-              scheduleContactSync(sharedResources.db);
-            } else if (type === "requestCapabilities" || type === "capabilityChange") {
-              scheduleCapabilitySync(sharedResources.db);
-            }
+            type = JSON.parse(detail)?.type;
           } catch { /* ignore parse errors */ }
+
+          if (!IS_IFRAME && type === "createAccount") {
+            scheduleAccountSync(sharedResources.db);
+          } else if (!IS_IFRAME && type === "registerSender") {
+            scheduleContactSync(sharedResources.db);
+          } else if (type === "requestCapabilities" || type === "capabilityChange") {
+            scheduleCapabilitySync(sharedResources.db);
+          }
+
+          // Don't forward internal-only events to the UI.
+          if (type === "capabilityChange") return;
+
+          onWalletEvent("wallet-update", detail);
         });
         wallet.addEventListener("authorization-request", (event: Event) => {
           onWalletEvent("authorization-request", (event as CustomEvent).detail);

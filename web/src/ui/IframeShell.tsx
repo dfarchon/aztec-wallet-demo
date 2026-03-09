@@ -324,8 +324,10 @@ function IframeContent() {
   const handlePinSubmit = useCallback(async (pin: string) => {
     setPinError(null);
 
-    // Request storage access if we don't have it yet (user gesture required)
-    if (document.requestStorageAccess) {
+    // Request storage access if we don't have it yet (user gesture required).
+    // Skip if already granted — Firefox rejects redundant requestStorageAccess() calls.
+    const alreadyGranted = await hasStorageAccessAlready();
+    if (!alreadyGranted && document.requestStorageAccess) {
       try {
         await document.requestStorageAccess();
       } catch {
