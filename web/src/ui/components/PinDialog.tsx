@@ -112,7 +112,7 @@ export function PinDialog({ mode, error, onSubmit }: PinDialogProps) {
               handleSubmit();
             }
           }}
-          inputProps={{ minLength: 6, maxLength: 32, autoComplete: "off" }}
+          inputProps={{ minLength: 6, maxLength: 32 }}
           fullWidth
           size="small"
           sx={textFieldSx}
@@ -127,7 +127,7 @@ export function PinDialog({ mode, error, onSubmit }: PinDialogProps) {
             onKeyDown={(e) => {
               if (e.key === "Enter" && e.isTrusted) handleSubmit();
             }}
-            inputProps={{ minLength: 6, maxLength: 32, autoComplete: "off" }}
+            inputProps={{ minLength: 6, maxLength: 32 }}
             fullWidth
             size="small"
             sx={textFieldSx}
