@@ -72,7 +72,7 @@ export class InternalWallet extends BaseNativeWallet {
     await this.db.storeSender(address, alias);
     // Register with PXE
     const result = await this.pxe.registerSender(address);
-    // Emit wallet-update so cookie sync picks up the new contact
+    // Emit wallet-update so the UI and cookie sync pick up the new contact
     const interaction = WalletInteraction.from({
       type: "registerSender",
       status: "SUCCESS",

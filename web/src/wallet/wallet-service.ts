@@ -70,29 +70,26 @@ type SessionData = {
 
 const RUNNING_SESSIONS = new Map<string, SessionData>();
 
-// ─── Debounced cookie sync ───
-// A single timer across all wallet-update events. Prevents redundant PBKDF2
-// derivations when multiple events fire in quick succession.
-let _cookieSyncTimer: ReturnType<typeof setTimeout> | null = null;
-let _cookieSyncDb: WalletDB | null = null;
+// ─── Targeted cookie sync ───
+// Each cookie is synced only when the relevant data changes, not on every
+// interaction update. Debounced to coalesce rapid successive changes.
 
-function scheduleCookieSync(db: WalletDB): void {
-  _cookieSyncDb = db;
-  if (_cookieSyncTimer) return; // already scheduled
-  _cookieSyncTimer = setTimeout(async () => {
-    _cookieSyncTimer = null;
-    if (_cookieSyncDb && _cookiePassphrase) {
-      if (!IS_IFRAME) {
-        // Accounts and contacts are standalone-only (source of truth).
-        await syncAccountsToCookie(_cookieSyncDb);
-        await syncContactsToCookie(_cookieSyncDb);
+function debouncedSync(fn: (db: WalletDB) => Promise<void>) {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  return (db: WalletDB) => {
+    if (timer) return;
+    timer = setTimeout(async () => {
+      timer = null;
+      if (_cookiePassphrase) {
+        await fn(db);
       }
-      // Capabilities sync bidirectionally — both standalone and iframe
-      // write the cookie after every modification.
-      await syncCapabilitiesToCookie(_cookieSyncDb);
-    }
-  }, 500);
+    }, 500);
+  };
 }
+
+const scheduleAccountSync = debouncedSync((db) => syncAccountsToCookie(db));
+const scheduleContactSync = debouncedSync((db) => syncContactsToCookie(db));
+const scheduleCapabilitySync = debouncedSync((db) => syncCapabilitiesToCookie(db));
 
 // ─── Passphrase management ───
 // Held in memory only — never persisted. Must be set before cookie operations.
@@ -245,8 +242,21 @@ export async function getOrCreateSession(
 
       const wireEvents = (wallet: ExternalWallet | InternalWallet) => {
         wallet.addEventListener("wallet-update", (event: Event) => {
-          onWalletEvent("wallet-update", (event as CustomEvent).detail);
-          scheduleCookieSync(sharedResources.db);
+          const detail = (event as CustomEvent).detail;
+          onWalletEvent("wallet-update", detail);
+
+          // Sync only the relevant cookie based on the interaction type.
+          try {
+            const parsed = JSON.parse(detail);
+            const type = parsed?.type;
+            if (!IS_IFRAME && type === "createAccount") {
+              scheduleAccountSync(sharedResources.db);
+            } else if (!IS_IFRAME && type === "registerSender") {
+              scheduleContactSync(sharedResources.db);
+            } else if (type === "requestCapabilities" || type === "capabilityChange") {
+              scheduleCapabilitySync(sharedResources.db);
+            }
+          } catch { /* ignore parse errors */ }
         });
         wallet.addEventListener("authorization-request", (event: Event) => {
           onWalletEvent("authorization-request", (event as CustomEvent).detail);
