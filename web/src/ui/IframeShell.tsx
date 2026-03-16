@@ -299,12 +299,17 @@ function IframeContent() {
   useEffect(() => {
     (async () => {
       const granted = await hasStorageAccessAlready();
+      console.log("[IframeShell] hasStorageAccess:", granted);
       if (granted) {
         // Already have storage access — check cookie state
-        if (hasCookiePassphrase()) {
+        const hasCookie = hasAccountsCookie();
+        const hasPassphrase = hasCookiePassphrase();
+        console.log("[IframeShell] hasCookie:", hasCookie, "hasPassphrase:", hasPassphrase);
+        console.log("[IframeShell] document.cookie:", document.cookie ? document.cookie.substring(0, 80) + "..." : "(empty)");
+        if (hasPassphrase) {
           setGate("ready");
           pinGateRef.current.resolve();
-        } else if (hasAccountsCookie()) {
+        } else if (hasCookie) {
           setGate("needs-pin");
         } else {
           setGate("no-cookie");
@@ -312,6 +317,7 @@ function IframeContent() {
       } else {
         // No storage access yet — show PIN dialog immediately.
         // Storage access will be requested on the user's button click (user gesture).
+        console.log("[IframeShell] No storage access yet, showing PIN dialog");
         setGate("needs-pin");
       }
     })();
@@ -327,18 +333,28 @@ function IframeContent() {
     // Request storage access if we don't have it yet (user gesture required).
     // Skip if already granted — Firefox rejects redundant requestStorageAccess() calls.
     const alreadyGranted = await hasStorageAccessAlready();
+    console.log("[IframeShell] handlePinSubmit: alreadyGranted:", alreadyGranted);
     if (!alreadyGranted && document.requestStorageAccess) {
       try {
+        console.log("[IframeShell] Calling requestStorageAccess()...");
         await document.requestStorageAccess();
-      } catch {
+        console.log("[IframeShell] requestStorageAccess() resolved successfully");
+        // Safari may need a moment to propagate the grant
+        const hasAccessAfter = await document.hasStorageAccess();
+        console.log("[IframeShell] hasStorageAccess after grant:", hasAccessAfter);
+        console.log("[IframeShell] document.cookie after grant:", document.cookie ? document.cookie.substring(0, 80) + "..." : "(empty)");
+      } catch (err) {
         // Browser requires a first-party visit before granting storage access
+        console.error("[IframeShell] requestStorageAccess() rejected:", err);
         setGate("needs-visit");
         return;
       }
     }
 
     // Now we have cookie access — verify the PIN
-    if (!hasAccountsCookie()) {
+    const hasCookie = hasAccountsCookie();
+    console.log("[IframeShell] After storage access: hasCookie:", hasCookie, "document.cookie:", document.cookie ? document.cookie.substring(0, 80) + "..." : "(empty)");
+    if (!hasCookie) {
       setGate("no-cookie");
       return;
     }
