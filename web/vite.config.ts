@@ -26,7 +26,7 @@ export default defineConfig({
     // CORP: cross-origin allows this page to be embedded as a cross-origin iframe by dApps
     headers: {
       "Cross-Origin-Opener-Policy": "same-origin",
-      "Cross-Origin-Embedder-Policy": "credentialless",
+      "Cross-Origin-Embedder-Policy": "require-corp",
       "Cross-Origin-Resource-Policy": "cross-origin",
     },
     fs: {
