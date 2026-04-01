@@ -19,6 +19,7 @@ export function AccountsManager() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [deployingAccount, setDeployingAccount] = useState<string | null>(null);
 
   const { walletAPI, embeddedMode, onRefreshAccounts } = useContext(WalletContext);
   const { currentNetwork } = useNetwork();
@@ -57,6 +58,19 @@ export function AccountsManager() {
       await loadAccounts();
     } catch (err: any) {
       setError(err.message || "Failed to create account");
+    }
+  };
+
+  const handleDeployAccount = async (account: InternalAccount) => {
+    setDeployingAccount(account.item.toString());
+    try {
+      await walletAPI.deployAccount(account.item);
+      await loadAccounts();
+    } catch (err: any) {
+      setError(err.message || "Failed to deploy account");
+      await loadAccounts();
+    } finally {
+      setDeployingAccount(null);
     }
   };
 
@@ -113,7 +127,19 @@ export function AccountsManager() {
             }}
           >
             {accounts.map((account, index) => (
-              <AccountBox key={index} QRButton account={account} />
+              <AccountBox
+                key={index}
+                QRButton
+                account={account}
+                onDeploy={
+                  embeddedMode ? undefined : () => handleDeployAccount(account)
+                }
+                isDeploying={
+                  deployingAccount === account.item.toString() ||
+                  account.deploymentStatus === "deploying"
+                }
+                showFundingHint={currentNetwork.id !== "localhost"}
+              />
             ))}
             {embeddedMode && (
               <Button

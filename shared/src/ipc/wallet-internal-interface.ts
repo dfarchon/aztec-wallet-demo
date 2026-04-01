@@ -3,7 +3,11 @@ import { type Wallet, WalletSchema, type GrantedCapability } from "@aztec/aztec.
 import { optional, schemas } from "@aztec/stdlib/schemas";
 import { z } from "zod";
 import { type ApiSchemaFor } from "@aztec/stdlib/schemas";
-import { AccountTypes, type AccountType } from "../wallet/database/wallet-db";
+import {
+  AccountDeploymentStatuses,
+  AccountTypes,
+  type AccountType,
+} from "../wallet/database/wallet-db";
 import type {
   ProofDebugExportRequest,
   WalletInteraction,
@@ -132,6 +136,7 @@ export type InternalWalletInterface = Omit<Wallet, "getAccounts"> & {
     salt: Fr,
     signingKey: Buffer
   ): Promise<void>;
+  deployAccount(address: z.infer<typeof schemas.AztecAddress>): Promise<void>;
   getAccounts(): Promise<InternalAccount[]>; // Override with enriched type
   getInteractions(): Promise<WalletInteraction<WalletInteractionType>[]>;
   getExecutionTrace(interactionId: string): Promise<
@@ -191,6 +196,8 @@ export const InternalWalletInterfaceSchema: ApiSchemaFor<InternalWalletInterface
         schemas.Fr,
         schemas.Buffer
       ),
+    // @ts-ignore Annoying zod error
+    deployAccount: z.function().args(schemas.AztecAddress),
     // @ts-ignore - Type inference for enriched InternalAccount with type field
     getAccounts: z
       .function()
@@ -201,6 +208,9 @@ export const InternalWalletInterfaceSchema: ApiSchemaFor<InternalWalletInterface
             alias: z.string(),
             item: schemas.AztecAddress,
             type: z.enum(AccountTypes),
+            deploymentStatus: z.enum(AccountDeploymentStatuses),
+            deploymentError: z.string().optional(),
+            feeJuiceBalanceBaseUnits: z.string().nullable().optional(),
           })
         )
       ),

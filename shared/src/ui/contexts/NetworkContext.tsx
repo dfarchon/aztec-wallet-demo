@@ -2,13 +2,12 @@ import {
   createContext,
   useContext,
   useState,
-  useEffect,
   type ReactNode,
 } from "react";
 import {
-  NETWORKS,
   DEFAULT_NETWORK,
-  getNetworkById,
+  getSelectableNetworkById,
+  getSelectableNetworks,
   type NetworkConfig,
 } from "../../config/networks";
 
@@ -29,21 +28,22 @@ interface NetworkProviderProps {
 
 export function NetworkProvider({ children }: NetworkProviderProps) {
   const [isNetworkSwitching, setIsNetworkSwitching] = useState(false);
+  const availableNetworks = getSelectableNetworks();
 
   // Initialize network from localStorage or use default
   const [currentNetwork, setCurrentNetwork] = useState<NetworkConfig>(() => {
     const savedNetworkId = localStorage.getItem(NETWORK_STORAGE_KEY);
     if (savedNetworkId) {
-      const network = getNetworkById(savedNetworkId);
+      const network = getSelectableNetworkById(savedNetworkId);
       if (network) return network;
     }
     return DEFAULT_NETWORK;
   });
 
   const switchNetwork = (networkId: string) => {
-    const network = getNetworkById(networkId);
+    const network = getSelectableNetworkById(networkId);
     if (!network) {
-      console.error(`Network with id ${networkId} not found`);
+      console.error(`Selectable network with id ${networkId} not found`);
       return;
     }
 
@@ -60,7 +60,7 @@ export function NetworkProvider({ children }: NetworkProviderProps) {
 
   const value: NetworkContextType = {
     currentNetwork,
-    availableNetworks: NETWORKS,
+    availableNetworks,
     switchNetwork,
     isNetworkSwitching,
   };

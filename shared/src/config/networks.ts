@@ -7,6 +7,7 @@ export interface NetworkConfig {
   version: number;
   description: string;
   color: string;
+  selectable: boolean;
   nodeUrl?: string;
 }
 
@@ -15,9 +16,10 @@ export const NETWORKS: NetworkConfig[] = [
     id: "localhost",
     name: "Localhost",
     chainId: 31337,
-    version: 0, // Auto-detect version
+    version: 344372055, // Auto-detect version
     description: "Local development network",
     color: "#4caf50",
+    selectable: true,
     nodeUrl: "http://localhost:8080",
   },
   {
@@ -27,23 +29,37 @@ export const NETWORKS: NetworkConfig[] = [
     version: 615022430,
     description: "Aztec Labs Devnet",
     color: "#2196f3",
+    selectable: false,
     nodeUrl: "https://v4-devnet-2.aztec-labs.com/",
   },
   {
-    id: "nextnet",
-    name: "Nextnet",
+    id: "testnet",
+    name: "Testnet",
     chainId: 11155111,
-    version: 1045856900,
-    description: "Aztec Labs Nextnet",
+    version: 4127419662,
+    description: "Aztec Labs Testnet",
     color: "#f321c9",
-    nodeUrl: "https://nextnet.aztec-labs.com/",
+    selectable: true,
+    nodeUrl: "https://rpc.testnet.aztec-labs.com",
   },
 ];
 
-export const DEFAULT_NETWORK = NETWORKS[1];
+export const DEFAULT_NETWORK = NETWORKS.find(
+  (network) => network.id === "testnet",
+)!;
 
 export function getNetworkById(id: string): NetworkConfig | undefined {
   return NETWORKS.find((network) => network.id === id);
+}
+
+export function getSelectableNetworks(): NetworkConfig[] {
+  return NETWORKS.filter((network) => network.selectable);
+}
+
+export function getSelectableNetworkById(
+  id: string,
+): NetworkConfig | undefined {
+  return getSelectableNetworks().find((network) => network.id === id);
 }
 
 export function getNetworkByChainId(

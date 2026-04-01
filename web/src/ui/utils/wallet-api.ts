@@ -106,11 +106,14 @@ export class WalletApi {
         }
 
         // Block account creation in iframe mode to prevent desyncs with cookie
-        if (propStr === "createAccount" && window.self !== window.top) {
+        if (
+          (propStr === "createAccount" || propStr === "deployAccount") &&
+          window.self !== window.top
+        ) {
           return async () => {
             throw new Error(
-              "Account creation is not available in embedded mode. " +
-              "Please create accounts in the standalone wallet.",
+              "Account management is not available in embedded mode. " +
+              "Please manage accounts in the standalone wallet.",
             );
           };
         }

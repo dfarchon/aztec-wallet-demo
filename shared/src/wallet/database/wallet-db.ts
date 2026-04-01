@@ -25,6 +25,19 @@ export const AccountTypes = [
 ] as const;
 export type AccountType = (typeof AccountTypes)[number];
 
+export const AccountDeploymentStatuses = [
+  "undeployed",
+  "deploying",
+  "deployed",
+] as const;
+export type AccountDeploymentStatus =
+  (typeof AccountDeploymentStatuses)[number];
+
+export interface AccountDeploymentState {
+  status: AccountDeploymentStatus;
+  error?: string;
+}
+
 
 /** Per-function timing from simulation/proving */
 interface FunctionTiming {
@@ -226,6 +239,46 @@ export class WalletDB {
     return { address, secretKey, salt, type, signingKey };
   }
 
+  async storeAccountDeploymentState(
+    address: AztecAddress,
+    { status, error }: AccountDeploymentState,
+  ) {
+    await this.accounts.set(
+      `${address.toString()}:deploymentStatus`,
+      Buffer.from(status),
+    );
+    if (error) {
+      await this.accounts.set(
+        `${address.toString()}:deploymentError`,
+        Buffer.from(error),
+      );
+    } else {
+      await this.accounts.delete(`${address.toString()}:deploymentError`);
+    }
+  }
+
+  async getAccountDeploymentState(
+    address: AztecAddress | string,
+  ): Promise<AccountDeploymentState> {
+    let status: AccountDeploymentStatus = "deployed";
+    let error: string | undefined;
+
+    try {
+      status = (await this.retrieveAccountMetadata(
+        address,
+        "deploymentStatus",
+      )).toString("utf8") as AccountDeploymentStatus;
+    } catch {}
+
+    try {
+      error = (
+        await this.retrieveAccountMetadata(address, "deploymentError")
+      ).toString("utf8");
+    } catch {}
+
+    return { status, error };
+  }
+
   async listAccounts(): Promise<Aliased<AztecAddress>[]> {
     const result = [];
     for await (const [alias, item] of this.aliases.entriesAsync()) {
@@ -254,6 +307,8 @@ export class WalletDB {
     await this.accounts.delete(`${address.toString()}:salt`);
     await this.accounts.delete(`${address.toString()}:type`);
     await this.accounts.delete(`${address.toString()}:signingKey`);
+    await this.accounts.delete(`${address.toString()}:deploymentStatus`);
+    await this.accounts.delete(`${address.toString()}:deploymentError`);
     const accounts = await this.listAccounts();
     const account = accounts.find((account) => address.equals(account.item));
     await this.aliases.delete(account?.alias);

@@ -1,27 +1,67 @@
-import Button from "@mui/material/Button";
 import Typography from "@mui/material/Typography";
 import Box from "@mui/material/Box";
 import Card from "@mui/material/Card";
-import ArrowDropDown from "@mui/icons-material/ArrowDropDown";
+import Button from "@mui/material/Button";
+import Chip from "@mui/material/Chip";
+import CircularProgress from "@mui/material/CircularProgress";
 import ContentCopyIcon from "@mui/icons-material/ContentCopy";
 import CheckIcon from "@mui/icons-material/Check";
 
-import { addressToShortStr, keyToShortStr } from "../../../../utils/format";
 import IconButton from "@mui/material/IconButton";
 import { useState } from "react";
 import QrCode from "@mui/icons-material/QrCode";
 import { QRDialog } from "../../../dialogs/QRDialog";
-import { type Aliased } from "@aztec/aztec.js/wallet";
-import { type AztecAddress } from "@aztec/aztec.js/addresses";
+import type { InternalAccount } from "../../../../../wallet/core/internal-wallet";
+import { formatFeeJuiceBalance } from "./fee-juice-format";
 
 interface AccountBoxProps {
-  account: Aliased<AztecAddress> & { type: string };
+  account: InternalAccount;
   QRButton?: boolean;
+  onDeploy?: () => void;
+  isDeploying?: boolean;
+  showFundingHint?: boolean;
 }
 
-export function AccountBox({ account, QRButton = false }: AccountBoxProps) {
+const FUNDING_URL = "https://bridge.gregojuice.anothercoffeefor.me/";
+
+function getStatusChipColor(status: InternalAccount["deploymentStatus"]) {
+  switch (status) {
+    case "deployed":
+      return "success";
+    case "deploying":
+      return "warning";
+    default:
+      return "default";
+  }
+}
+
+function getStatusLabel(status: InternalAccount["deploymentStatus"]) {
+  switch (status) {
+    case "deployed":
+      return "Deployed";
+    case "deploying":
+      return "Deploying";
+    default:
+      return "Undeployed";
+  }
+}
+
+export function AccountBox({
+  account,
+  QRButton = false,
+  onDeploy,
+  isDeploying = false,
+  showFundingHint = false,
+}: AccountBoxProps) {
   const [openQR, setOpenQR] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [copiedFundingLink, setCopiedFundingLink] = useState(false);
+  const deploymentStatus = isDeploying ? "deploying" : account.deploymentStatus;
+  const showDeployAction = deploymentStatus !== "deployed" && !!onDeploy;
+  const feeJuiceBalanceLabel =
+    account.feeJuiceBalanceBaseUnits == null
+      ? "unavailable"
+      : formatFeeJuiceBalance(account.feeJuiceBalanceBaseUnits);
 
   const handleCopy = async () => {
     if (account.item) {
@@ -29,6 +69,12 @@ export function AccountBox({ account, QRButton = false }: AccountBoxProps) {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     }
+  };
+
+  const handleCopyFundingLink = async () => {
+    await navigator.clipboard.writeText(FUNDING_URL);
+    setCopiedFundingLink(true);
+    setTimeout(() => setCopiedFundingLink(false), 2000);
   };
 
   return (
@@ -82,6 +128,28 @@ export function AccountBox({ account, QRButton = false }: AccountBoxProps) {
           >
             {account.type}
           </Typography>
+          {account.item && (
+            <Typography
+              variant="caption"
+              sx={{
+                display: "block",
+                mt: 0.5,
+                color: "text.secondary",
+                fontSize: "0.7rem",
+              }}
+            >
+              Fee juice: {feeJuiceBalanceLabel}
+            </Typography>
+          )}
+          <Box sx={{ mt: 1, display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap" }}>
+            <Chip
+              label={getStatusLabel(deploymentStatus)}
+              color={getStatusChipColor(deploymentStatus)}
+              size="small"
+              variant={deploymentStatus === "undeployed" ? "outlined" : "filled"}
+            />
+            {isDeploying && <CircularProgress size={14} />}
+          </Box>
         </Box>
         {account.item && (
           <IconButton
@@ -100,6 +168,51 @@ export function AccountBox({ account, QRButton = false }: AccountBoxProps) {
           </IconButton>
         )}
       </Box>
+      {(showDeployAction || account.deploymentError) && (
+        <Box
+          sx={{
+            px: 2,
+            pb: 2,
+            display: "flex",
+            flexDirection: "column",
+            gap: 1,
+          }}
+        >
+          {account.deploymentError && deploymentStatus !== "deploying" && (
+            <Typography variant="caption" color="error.main">
+              {account.deploymentError}
+            </Typography>
+          )}
+          {showFundingHint && deploymentStatus === "undeployed" && (
+            <Box sx={{ display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap" }}>
+              <Typography variant="caption" color="text.secondary">
+                Fund this address with fee juice, then deploy it.
+              </Typography>
+              <Button
+                variant="text"
+                size="small"
+                startIcon={copiedFundingLink ? <CheckIcon fontSize="small" /> : <ContentCopyIcon fontSize="small" />}
+                onClick={handleCopyFundingLink}
+                sx={{ alignSelf: "flex-start", px: 0.5, minWidth: "auto" }}
+              >
+                {copiedFundingLink ? "Copied" : "Copy link"}
+              </Button>
+            </Box>
+          )}
+          {showDeployAction && (
+            <Box sx={{ display: "flex", justifyContent: "flex-end" }}>
+              <Button
+                variant="outlined"
+                size="small"
+                onClick={onDeploy}
+                disabled={isDeploying}
+              >
+                Deploy
+              </Button>
+            </Box>
+          )}
+        </Box>
+      )}
       {openQR && account.item && (
         <QRDialog
           open={openQR}

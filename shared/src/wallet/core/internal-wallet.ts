@@ -9,7 +9,10 @@ import {
   type Capability,
 } from "@aztec/aztec.js/wallet";
 import { type Fr } from "@aztec/aztec.js/fields";
-import type { AccountType } from "../database/wallet-db";
+import {
+  type AccountDeploymentStatus,
+  type AccountType,
+} from "../database/wallet-db";
 import {
   WalletInteraction,
   WalletUpdateEvent,
@@ -26,15 +29,61 @@ import { TxDecodingService } from "../decoding/tx-decoding-service";
 
 import { BaseNativeWallet } from "./base-native-wallet.ts";
 import {
+  emptyOffchainOutput,
   NO_WAIT,
   toSendOptions,
   type InteractionWaitOptions,
   type SendReturn,
 } from "@aztec/aztec.js/contracts";
-import { waitForTx } from "@aztec/aztec.js/node";
+import { waitForTx, type AztecNode } from "@aztec/aztec.js/node";
+import { ProtocolContractAddress } from "@aztec/protocol-contracts";
+import { computeFeePayerBalanceStorageSlot } from "@aztec/protocol-contracts/fee-juice";
+import { getNetworkByChainId } from "../../config/networks";
 
 // Enriched account type for internal use
-export type InternalAccount = Aliased<AztecAddress> & { type: AccountType };
+export type InternalAccount = Aliased<AztecAddress> & {
+  type: AccountType;
+  deploymentStatus: AccountDeploymentStatus;
+  deploymentError?: string;
+  feeJuiceBalanceBaseUnits?: string | null;
+};
+
+async function getFeeJuiceBalanceBaseUnits(
+  aztecNode: Pick<AztecNode, "getPublicStorageAt">,
+  address: AztecAddress,
+): Promise<string> {
+  const slot = await computeFeePayerBalanceStorageSlot(address);
+  const balance = await aztecNode.getPublicStorageAt(
+    "latest",
+    ProtocolContractAddress.FeeJuice,
+    slot,
+  );
+  return balance.toBigInt().toString();
+}
+
+export function shouldUseSponsoredDeployment(networkId?: string): boolean {
+  return networkId === "localhost";
+}
+
+export function buildDeployAccountOptions(
+  networkId: string | undefined,
+  paymentMethod?: NonNullable<DeployAccountOptions["fee"]>["paymentMethod"],
+): DeployAccountOptions {
+  const options: DeployAccountOptions = {
+    from: AztecAddress.ZERO,
+    skipClassPublication: true,
+    skipInstancePublication: true,
+  };
+
+  if (shouldUseSponsoredDeployment(networkId)) {
+    if (!paymentMethod) {
+      throw new Error("Sponsored deployment requires a payment method");
+    }
+    options.fee = { paymentMethod };
+  }
+
+  return options;
+}
 
 /**
  * 1. Skips all authorization checks (trusted internal GUI)
@@ -52,15 +101,33 @@ export class InternalWallet extends BaseNativeWallet {
 
   // Override getAccounts to return enriched data with account types
   override async getAccounts(): Promise<InternalAccount[]> {
-    // Skip authorization via override above
     const accounts = await this.db.listAccounts();
 
-    // Enrich with account type information
     return Promise.all(
-      accounts.map(async (acc) => ({
-        ...acc,
-        type: (await this.db.retrieveAccount(acc.item)).type,
-      })),
+      accounts.map(async (acc) => {
+        const [{ type }, deploymentState, feeJuiceBalanceBaseUnits] =
+          await Promise.all([
+          this.db.retrieveAccount(acc.item),
+          this.db.getAccountDeploymentState(acc.item),
+          getFeeJuiceBalanceBaseUnits(this.aztecNode, acc.item).catch(
+            (error: unknown) => {
+              const message =
+                error instanceof Error ? error.message : String(error);
+              this.log.warn(
+                `Failed to load FeeJuice balance for ${acc.item.toString()}: ${message}`,
+              );
+              return null;
+            },
+          ),
+        ]);
+        return {
+          ...acc,
+          type,
+          deploymentStatus: deploymentState.status,
+          deploymentError: deploymentState.error,
+          feeJuiceBalanceBaseUnits,
+        };
+      }),
     );
   }
 
@@ -98,7 +165,7 @@ export class InternalWallet extends BaseNativeWallet {
       type: "createAccount",
       status: "CREATING",
       complete: false,
-      title: `Creating and deploying account ${alias}`,
+      title: `Creating account ${alias}`,
     });
     await this.interactionManager.storeAndEmit(interaction);
 
@@ -116,37 +183,17 @@ export class InternalWallet extends BaseNativeWallet {
         alias,
         signingKey,
       });
+      await this.db.storeAccountDeploymentState(accountManager.address, {
+        status: "undeployed",
+      });
       await this.interactionManager.storeAndEmit(
         interaction.update({
-          status: "PREPARING ACCOUNT",
+          status: "ACCOUNT CREATED",
+          complete: true,
           description: `Address ${accountManager.address.toString()}`,
         }),
       );
-
-      const deployMethod = await accountManager.getDeployMethod();
-      const { prepareForFeePayment } =
-        await import("../utils/sponsored-fpc.ts");
-      const paymentMethod = await prepareForFeePayment(this);
-      const opts: DeployAccountOptions = {
-        from: AztecAddress.ZERO,
-        fee: {
-          paymentMethod,
-        },
-        skipClassPublication: true,
-        skipInstancePublication: true,
-      };
-
-      const exec = await deployMethod.request({
-        ...opts,
-        deployer: AztecAddress.ZERO,
-      });
-      await this.sendTx(exec, await toSendOptions(opts), interaction);
-
-      await this.interactionManager.storeAndEmit(
-        interaction.update({ status: "DEPLOYED", complete: true }),
-      );
     } catch (error: any) {
-      // Update interaction with error status
       await this.interactionManager.storeAndEmit(
         interaction.update({
           status: "ERROR",
@@ -155,6 +202,70 @@ export class InternalWallet extends BaseNativeWallet {
         }),
       );
       // Re-throw so the UI can also handle it
+      throw error;
+    }
+  }
+
+  async deployAccount(address: AztecAddress): Promise<void> {
+    const interaction = WalletInteraction.from({
+      type: "deployAccount",
+      status: "PREPARING ACCOUNT",
+      complete: false,
+      title: `Deploying account ${address.toString()}`,
+      description: `Address ${address.toString()}`,
+    });
+    await this.db.storeAccountDeploymentState(address, {
+      status: "deploying",
+    });
+    await this.interactionManager.storeAndEmit(interaction);
+
+    try {
+      const { secretKey, salt, signingKey, type } =
+        await this.db.retrieveAccount(address);
+      const accountManager = await this.getAccountManager(
+        type,
+        secretKey,
+        salt,
+        signingKey,
+      );
+      const deployMethod = await accountManager.getDeployMethod();
+      const network = getNetworkByChainId(
+        this.chainInfo.chainId.toNumber(),
+        this.chainInfo.version.toNumber(),
+      );
+
+      const paymentMethod = shouldUseSponsoredDeployment(network?.id)
+        ? await import("../utils/sponsored-fpc.ts").then((module) =>
+            module.prepareForFeePayment(this),
+          )
+        : undefined;
+      const opts = buildDeployAccountOptions(network?.id, paymentMethod);
+
+      const exec = await deployMethod.request({
+        ...opts,
+        deployer: AztecAddress.ZERO,
+      });
+      await this.sendTx(exec, await toSendOptions(opts), interaction);
+
+      await this.db.storeAccountDeploymentState(address, {
+        status: "deployed",
+      });
+      await this.interactionManager.storeAndEmit(
+        interaction.update({ status: "DEPLOYED", complete: true }),
+      );
+    } catch (error: any) {
+      const message = error.message || String(error);
+      await this.db.storeAccountDeploymentState(address, {
+        status: "undeployed",
+        error: message,
+      });
+      await this.interactionManager.storeAndEmit(
+        interaction.update({
+          status: "ERROR",
+          complete: true,
+          description: `Failed: ${message}`,
+        }),
+      );
       throw error;
     }
   }
@@ -216,7 +327,7 @@ export class InternalWallet extends BaseNativeWallet {
     const sendingTime = Date.now() - sendingStartTime;
     this.log.info(`Sent transaction ${txHash}`);
 
-    // If wait is NO_WAIT, return txHash immediately
+    // If wait is NO_WAIT, return object with txHash and empty offchain output
     if (opts.wait === NO_WAIT) {
       const timingSummary = `Prove: ${formatDuration(provingTime)} | Send: ${formatDuration(sendingTime)}`;
       await this.interactionManager.storeAndEmit(
@@ -229,10 +340,13 @@ export class InternalWallet extends BaseNativeWallet {
           timings: { ...rawStats.timings, sending: sendingTime },
         });
       }
-      return txHash as SendReturn<W>;
+      return {
+        txHash,
+        ...emptyOffchainOutput(),
+      } as SendReturn<W>;
     }
 
-    // Otherwise, wait for the full receipt (default behavior on wait: undefined)
+    // Otherwise, return object with receipt and empty offchain output
     await this.interactionManager.storeAndEmit(interaction.update({ status: "MINING" }));
     const miningStartTime = Date.now();
     const waitOpts = typeof opts.wait === "object" ? opts.wait : undefined;
@@ -251,7 +365,10 @@ export class InternalWallet extends BaseNativeWallet {
       });
     }
 
-    return receipt as SendReturn<W>;
+    return {
+      receipt,
+      ...emptyOffchainOutput(),
+    } as SendReturn<W>;
   }
 
   // Internal-only method: Delete account

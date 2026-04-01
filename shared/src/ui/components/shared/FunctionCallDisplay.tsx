@@ -7,7 +7,7 @@ import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import Chip from "@mui/material/Chip";
 import CallMadeIcon from "@mui/icons-material/CallMade";
 import VpnKeyIcon from "@mui/icons-material/VpnKey";
-import type { ReactNode } from "react";
+import { Fragment, type ReactNode } from "react";
 
 export interface FunctionCallDisplayProps {
   contractName: string;
@@ -184,9 +184,8 @@ export function FunctionCallDisplay({
                   }}
                 >
                   {args.map((arg, i) => (
-                    <>
+                    <Fragment key={`arg-${arg.name}-${i}`}>
                       <Typography
-                        key={`${i}-name`}
                         sx={{
                           fontFamily: "monospace",
                           fontSize: compact ? "0.7rem" : "0.875rem",
@@ -199,7 +198,6 @@ export function FunctionCallDisplay({
                         {arg.name}:
                       </Typography>
                       <Typography
-                        key={`${i}-value`}
                         sx={{
                           fontFamily: "monospace",
                           fontSize: compact ? "0.7rem" : "0.8125rem",
@@ -208,7 +206,7 @@ export function FunctionCallDisplay({
                       >
                         {arg.value}
                       </Typography>
-                    </>
+                    </Fragment>
                   ))}
                 </Box>
               </Box>
@@ -239,9 +237,8 @@ export function FunctionCallDisplay({
                   }}
                 >
                   {returnValues.map((rv, i) => (
-                    <>
+                    <Fragment key={`return-${rv.name}-${i}`}>
                       <Typography
-                        key={`${i}-name`}
                         sx={{
                           fontFamily: "monospace",
                           fontSize: compact ? "0.7rem" : "0.875rem",
@@ -254,7 +251,6 @@ export function FunctionCallDisplay({
                         {rv.name}:
                       </Typography>
                       <Typography
-                        key={`${i}-value`}
                         sx={{
                           fontFamily: "monospace",
                           fontSize: compact ? "0.7rem" : "0.8125rem",
@@ -263,7 +259,7 @@ export function FunctionCallDisplay({
                       >
                         {rv.value}
                       </Typography>
-                    </>
+                    </Fragment>
                   ))}
                 </Box>
               </Box>

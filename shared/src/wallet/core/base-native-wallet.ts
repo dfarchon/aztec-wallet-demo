@@ -20,7 +20,6 @@ import type {
   AuthorizationResponse,
 } from "../types/authorization";
 import { prepareForFeePayment } from "../utils/sponsored-fpc";
-import { AccountFeePaymentMethodOptions } from "@aztec/entrypoints/account";
 import { GasSettings } from "@aztec/stdlib/gas";
 import {
   EcdsaKAccountContract,
@@ -32,8 +31,12 @@ import {
   StubAccountContractArtifact,
 } from "@aztec/accounts/stub";
 import { getCanonicalMultiCallEntrypoint } from "@aztec/protocol-contracts/multi-call-entrypoint";
+import { ProtocolContractAddress } from "@aztec/protocol-contracts";
+import { computeFeePayerBalanceStorageSlot } from "@aztec/protocol-contracts/fee-juice";
 import type { FieldsOf } from "@aztec/foundation/types";
 import { BaseWallet, type FeeOptions } from "@aztec/wallet-sdk/base-wallet";
+import { getNetworkByChainId } from "../../config/networks";
+import { resolveFeeStrategy } from "../utils/fee-strategy";
 
 /**
  * Base class for native wallet implementations (external and internal).
@@ -241,21 +244,29 @@ export abstract class BaseNativeWallet
     feePayer?: AztecAddress,
     gasSettings?: Partial<FieldsOf<GasSettings>>,
   ): Promise<FeeOptions> {
+    const network = getNetworkByChainId(
+      this.chainInfo.chainId.toNumber(),
+      this.chainInfo.version.toNumber(),
+    );
     const maxFeesPerGas =
       gasSettings?.maxFeesPerGas ??
       (await this.aztecNode.getCurrentMinFees()).mul(1 + this.minFeePadding);
+    const decision = resolveFeeStrategy(network?.id, from, feePayer);
     let walletFeePaymentMethod;
-    let accountFeePaymentMethodOptions;
-    // The transaction does not include a fee payment method, so we set a default
-    if (!feePayer) {
+    if (decision.useSponsoredPaymentMethod) {
       walletFeePaymentMethod = await prepareForFeePayment(this);
-      accountFeePaymentMethodOptions = AccountFeePaymentMethodOptions.EXTERNAL;
-    } else {
-      // The transaction includes fee payment method, so we check if we are the fee payer for it
-      // (this can only happen if the embedded payment method is FeeJuiceWithClaim)
-      accountFeePaymentMethodOptions = from.equals(feePayer)
-        ? AccountFeePaymentMethodOptions.FEE_JUICE_WITH_CLAIM
-        : AccountFeePaymentMethodOptions.EXTERNAL;
+    } else if (decision.requiresSenderFeeJuiceBalanceCheck) {
+      const balanceSlot = await computeFeePayerBalanceStorageSlot(from);
+      const balance = await this.aztecNode.getPublicStorageAt(
+        "latest",
+        ProtocolContractAddress.FeeJuice,
+        balanceSlot,
+      );
+      if (balance.toBigInt() === 0n) {
+        throw new Error(
+          `Insufficient FeeJuice balance for sender on ${network?.id ?? "this network"}; fund the account before sending`,
+        );
+      }
     }
     const fullGasSettings: GasSettings = GasSettings.default({
       ...gasSettings,
@@ -264,7 +275,7 @@ export abstract class BaseNativeWallet
     return {
       gasSettings: fullGasSettings,
       walletFeePaymentMethod,
-      accountFeePaymentMethodOptions,
+      accountFeePaymentMethodOptions: decision.accountFeePaymentMethodOptions,
     };
   }
 

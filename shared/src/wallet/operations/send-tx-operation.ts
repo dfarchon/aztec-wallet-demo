@@ -28,6 +28,7 @@ import {
 } from "../utils/simulation-utils";
 import type { SendOptions } from "@aztec/aztec.js/wallet";
 import {
+  emptyOffchainOutput,
   NO_WAIT,
   type InteractionWaitOptions,
   type SendReturn,
@@ -346,15 +347,18 @@ export class SendTxOperation<
 
     const sendingTime = Date.now() - sendingStartTime;
 
-    // If wait is NO_WAIT, return txHash immediately
+    // If wait is NO_WAIT, return object with txHash and empty offchain output
     if (executionData.wait === NO_WAIT) {
       await this.emitProgress("SENT", `TxHash: ${txHash.toString()}`, true);
       const enrichedStats = { ...rawStats, timings: { ...rawStats.timings, simulation: executionData.simulationTime, sending: sendingTime } };
       await this.db.updateTxPayloadStats(executionData.payloadHash, enrichedStats);
-      return txHash as SendTxResult<W>;
+      return {
+        txHash,
+        ...emptyOffchainOutput(),
+      } as SendTxResult<W>;
     }
 
-    // Otherwise, wait for the full receipt (default behavior on wait: undefined)
+    // Otherwise, return object with receipt and empty offchain output
     await this.emitProgress("MINING", `TxHash: ${txHash.toString()}`);
     const miningStartTime = Date.now();
     const waitOpts =
@@ -367,6 +371,9 @@ export class SendTxOperation<
     const enrichedStats = { ...rawStats, timings: { ...rawStats.timings, simulation: executionData.simulationTime, sending: sendingTime, mining: miningTime } };
     await this.db.updateTxPayloadStats(executionData.payloadHash, enrichedStats);
 
-    return receipt as SendTxResult<W>;
+    return {
+      receipt,
+      ...emptyOffchainOutput(),
+    } as SendTxResult<W>;
   }
 }

@@ -250,7 +250,7 @@ export async function getOrCreateSession(
             type = JSON.parse(detail)?.type;
           } catch { /* ignore parse errors */ }
 
-          if (!IS_IFRAME && type === "createAccount") {
+          if (!IS_IFRAME && (type === "createAccount" || type === "deployAccount")) {
             scheduleAccountSync(sharedResources.db);
           } else if (!IS_IFRAME && type === "registerSender") {
             scheduleContactSync(sharedResources.db);

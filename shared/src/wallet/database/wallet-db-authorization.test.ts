@@ -220,6 +220,66 @@ describe("requested vs granted separation", () => {
   });
 });
 
+describe("account deployment state", () => {
+  it("defaults missing deployment metadata to deployed", async () => {
+    await db.storeAccount(addr1, {
+      type: "ecdsasecp256r1",
+      secretKey: Fr.random(),
+      salt: Fr.random(),
+      alias: "Account 1",
+      signingKey: Buffer.alloc(32),
+    });
+
+    await expect(db.getAccountDeploymentState(addr1)).resolves.toEqual({
+      status: "deployed",
+      error: undefined,
+    });
+  });
+
+  it("stores deployment state and preserves errors", async () => {
+    await db.storeAccount(addr1, {
+      type: "ecdsasecp256r1",
+      secretKey: Fr.random(),
+      salt: Fr.random(),
+      alias: "Account 1",
+      signingKey: Buffer.alloc(32),
+    });
+
+    await db.storeAccountDeploymentState(addr1, {
+      status: "undeployed",
+      error: "Fund first",
+    });
+
+    await expect(db.getAccountDeploymentState(addr1)).resolves.toEqual({
+      status: "undeployed",
+      error: "Fund first",
+    });
+  });
+
+  it("clears deployment errors when state is updated without one", async () => {
+    await db.storeAccount(addr1, {
+      type: "ecdsasecp256r1",
+      secretKey: Fr.random(),
+      salt: Fr.random(),
+      alias: "Account 1",
+      signingKey: Buffer.alloc(32),
+    });
+
+    await db.storeAccountDeploymentState(addr1, {
+      status: "undeployed",
+      error: "Fund first",
+    });
+    await db.storeAccountDeploymentState(addr1, {
+      status: "deploying",
+    });
+
+    await expect(db.getAccountDeploymentState(addr1)).resolves.toEqual({
+      status: "deploying",
+      error: undefined,
+    });
+  });
+});
+
 describe("capability removal round-trips", () => {
   it("removing contract metadata for one contract doesn't affect others", async () => {
     // Grant register + metadata for both contracts

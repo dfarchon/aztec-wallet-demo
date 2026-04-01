@@ -30,7 +30,12 @@ import type { ExecutionStats } from "../../shared/PhaseTimeline";
 import { TxProgressTimeline } from "../../shared/TxProgressTimeline";
 import { WalletContext } from "../../../renderer";
 
-const TX_TYPES: WalletInteractionType[] = ["sendTx", "simulateTx", "simulateUtility", "createAccount"];
+const TX_TYPES: WalletInteractionType[] = [
+  "sendTx",
+  "simulateTx",
+  "simulateUtility",
+  "deployAccount",
+];
 
 interface InteractionsListProps {
   interactions: WalletInteraction<WalletInteractionType>[];
@@ -72,7 +77,7 @@ const getStatusIcon = (status: string, complete: boolean) => {
 
 // Check if a transaction has completed proving (status moved past PROVING)
 const isProvenTx = (type: WalletInteractionType, status: string): boolean => {
-  if (type !== "sendTx" && type !== "createAccount") return false;
+  if (type !== "sendTx" && type !== "deployAccount") return false;
   const postProvingStatuses = ["SENDING", "SENT", "MINED", "DEPLOYED"];
   return postProvingStatuses.some((s) => status.includes(s));
 };
@@ -81,6 +86,7 @@ const getInteractionTypeLabel = (type: WalletInteractionType) => {
   const labels: Record<WalletInteractionType, string> = {
     registerContract: "Register Contract",
     createAccount: "Create Account",
+    deployAccount: "Deploy Account",
     simulateTx: "Simulate Transaction",
     simulateUtility: "Simulate Utility",
     sendTx: "Send Transaction",
@@ -101,6 +107,7 @@ const getInteractionTypeColor = (type: WalletInteractionType) => {
   const colors: Record<WalletInteractionType, string> = {
     registerContract: "#9c27b0", // purple
     createAccount: "#2196f3", // blue
+    deployAccount: "#7c4dff", // purple/violet
     simulateTx: "#ff9800", // orange
     simulateUtility: "#ff9800", // orange (same as simulateTx)
     sendTx: "#7c4dff", // purple/violet (proving action)
@@ -120,6 +127,7 @@ const getInteractionTypeColor = (type: WalletInteractionType) => {
 const allInteractionTypes: WalletInteractionType[] = [
   "registerContract",
   "createAccount",
+  "deployAccount",
   "simulateTx",
   "simulateUtility",
   "sendTx",

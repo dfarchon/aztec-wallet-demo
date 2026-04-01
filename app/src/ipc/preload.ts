@@ -1,8 +1,9 @@
 import type { Aliased } from "@aztec/aztec.js/wallet";
 import type { AztecAddress } from "@aztec/aztec.js/addresses";
 import { contextBridge, ipcRenderer } from "electron";
-import type { TxHash, TxReceipt } from "@aztec/stdlib/tx";
+import type { TxReceipt } from "@aztec/stdlib/tx";
 import type {
+  InternalAccount,
   WalletInteraction,
   WalletInteractionType,
 } from "@demo-wallet/shared/core";
@@ -17,11 +18,14 @@ contextBridge.exposeInMainWorld("walletAPI", {
   getAddressBook(stringifiedArgs: string): Promise<Aliased<AztecAddress>[]> {
     return ipcRenderer.invoke("getAddressBook", stringifiedArgs);
   },
-  getAccounts(stringifiedArgs: string): Promise<Aliased<AztecAddress>[]> {
+  getAccounts(stringifiedArgs: string): Promise<InternalAccount[]> {
     return ipcRenderer.invoke("getAccounts", stringifiedArgs);
   },
-  createAccount(stringifiedArgs: string): Promise<TxHash> {
+  createAccount(stringifiedArgs: string): Promise<void> {
     return ipcRenderer.invoke("createAccount", stringifiedArgs);
+  },
+  deployAccount(stringifiedArgs: string): Promise<void> {
+    return ipcRenderer.invoke("deployAccount", stringifiedArgs);
   },
   getInteractions(
     stringifiedArgs: string
