@@ -2,6 +2,11 @@
 
 An Aztec wallet application that allows dApps to interact with user accounts through a secure interface.
 
+## Project Status
+
+This repository is a fork of [AztecProtocol/demo-wallet](https://github.com/AztecProtocol/demo-wallet.git).
+It is currently maintained for research purposes and is primarily used together with [dfpunk-aztec](https://github.com/dfarchon/dfpunk-aztec).
+
 ## Architecture
 
 The wallet uses **Native Messaging** for secure communication between the browser extension and the Electron app:
